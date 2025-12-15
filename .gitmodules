@@ -1,0 +1,6 @@
+[submodule "lib/chip8"]
+	path = lib/chip8
+	url = git@github.com:sbond75/chip8.git
+[submodule "lib/SDL"]
+	path = lib/SDL
+	url = https://github.com/libsdl-org/SDL
