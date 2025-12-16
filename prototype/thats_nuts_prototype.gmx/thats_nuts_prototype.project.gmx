@@ -25,6 +25,8 @@
     <script>scripts\set_tile.gml</script>
     <script>scripts\get_tile.gml</script>
     <script>scripts\move_player.gml</script>
+    <script>scripts\scr_nut_init.gml</script>
+    <script>scripts\acorn_destroy.gml</script>
   </scripts>
   <objects name="objects">
     <object>objects\obj_squirrel</object>

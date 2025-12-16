@@ -30,9 +30,23 @@ if keyboard_check_pressed(vk_space) && mytile == global.tileTBranch {
 }
 
 // Check for walking over acorn
-if mytile == 1 and !acorn {
+// Look for an acorn instance exactly on this tile
+var nut;
+nut = collision_rectangle(
+    bbox_left,
+    bbox_top,
+    bbox_right,
+    bbox_bottom,
+    obj_nut,
+    false,  // precise = false (bbox is fine and cheaper)
+    false   // notme = false (player is not obj_nut anyway)
+);
+if nut != noone and !acorn {
     // Auto pick up
     acorn = true
+    
+    // Destroy the acorn
+    acorn_destroy(nut)
 }
 
 // Check for acorn bury or dig up

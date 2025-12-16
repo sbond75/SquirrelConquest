@@ -31,15 +31,7 @@ for (my = 0; my < global.mapHeight; my += 1)
         var spr;
         spr = noone;
 
-        if (t == global.tileTNut)
-        {
-            spr = spr_nut;
-        }
-        else if (t == global.tileTBuriedNut)
-        {
-            spr = spr_buried_nut;
-        }
-        else if (t == global.tileTBranch)
+        if (t == global.tileTBranch)
         {
             spr = spr_branch;
         }

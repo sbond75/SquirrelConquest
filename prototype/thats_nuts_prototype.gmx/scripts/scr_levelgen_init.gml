@@ -76,9 +76,74 @@ for (i = 0; i < n; i += 1)
                     // }
 
                     // Simple: just place branch tile
-                    set_tile(x2, y2, 3);
+                    set_tile(x2, y2, global.tileTBranch);
                 }
             }
+        }
+    }
+}
+
+
+
+// -----------------------------------------------------------------------------
+// 2. Place acorns
+//    - Lower chance on branch tiles
+//    - Higher chance elsewhere on the map
+// -----------------------------------------------------------------------------
+
+var tileSize;
+tileSize = 16; // tile size in pixels, adjust to your game
+
+var branchNutChance;
+var randomNutChance;
+
+// "On branches" less likely than "random around map"
+branchNutChance = 0.01;  // 1% per branch tile
+randomNutChance = 0.02;  // 2% per non-branch tile
+
+var mx;
+var my;
+
+for (my = 0; my < global.mapHeight; my += 1)
+{
+    for (mx = 0; mx < global.mapWidth; mx += 1)
+    {
+        var tileType;
+        tileType = get_tile(mx, my);
+
+        var chance;
+        chance = 0;
+
+        if (tileType == global.tileTBranch)
+        {
+            chance = branchNutChance;
+        }
+        else
+        {
+            chance = randomNutChance;
+        }
+        
+        // Check limit
+        if global.nutCounter >= global.numNuts {
+            break;
+        }
+
+        if (chance > 0 && random(1) < chance)
+        {
+            // Create acorn aligned to tile
+            var px;
+            var py;
+            px = mx * tileSize;
+            py = my * tileSize;
+
+            var nutInst;
+            nutInst = instance_create(px, py, obj_nut);
+
+            // Store in global.nuts as a growing array
+            var nutIndex;
+            nutIndex = global.nutCounter;
+            global.nuts[nutIndex] = nutInst;
+            global.nutCounter++;
         }
     }
 }
