@@ -1,18 +1,25 @@
-var move_speed;
-move_speed = 1
+var moveSpeed;
+moveSpeed = 1
 
-if keyboard_check(ord("W")) {
-    tileY -= move_speed
+move_player(moveSpeed)
+
+//////////////
+
+// Check wrap
+if tileX < 0 {
+    tileX = 0
 }
-if keyboard_check(ord("A")) {
-    tileX -= move_speed
+if tileX >= global.mapWidth {
+    tileX = global.mapWidth - 1
 }
-if keyboard_check(ord("S")) {
-    tileY += move_speed
+if tileY < 0 {
+    tileY = 0
 }
-if keyboard_check(ord("D")) {
-    tileX += move_speed
+if tileY >= global.mapHeight {
+    tileY = global.mapHeight - 1
 }
+
+//////////////
 
 var mytile;
 mytile = get_tile(tileX, tileY)
@@ -49,20 +56,6 @@ if keyboard_check_pressed(ord("E")) {
 
 
 //////////
-
-// Check wrap
-if tileX < 0 {
-    tileX = 0
-}
-if tileX >= global.mapWidth {
-    tileX = global.mapWidth - 1
-}
-if tileY < 0 {
-    tileY = 0
-}
-if tileY >= global.mapHeight {
-    tileY = global.mapHeight - 1
-}
 
 // Apply movement to sprite/obj
 x = tileX * global.tileSize

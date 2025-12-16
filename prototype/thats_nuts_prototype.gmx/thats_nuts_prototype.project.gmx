@@ -16,13 +16,15 @@
   <backgrounds name="background"/>
   <paths name="paths"/>
   <scripts name="scripts">
-    <script>scripts\scr_player_step.gml</script>
     <script>scripts\scr_player_init.gml</script>
+    <script>scripts\scr_player_step.gml</script>
+    <script>scripts\scr_player_draw.gml</script>
     <script>scripts\scr_levelgen_init.gml</script>
     <script>scripts\scr_level_init.gml</script>
     <script>scripts\scr_level_draw.gml</script>
     <script>scripts\set_tile.gml</script>
     <script>scripts\get_tile.gml</script>
+    <script>scripts\move_player.gml</script>
   </scripts>
   <objects name="objects">
     <object>objects\obj_squirrel</object>
