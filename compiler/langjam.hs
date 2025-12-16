@@ -13,6 +13,7 @@ import Data.Functor.Identity (runIdentity)
 import Control.Monad.State (evalState, execState, modify, gets)
 import Control.Monad.Random (Rand, StdGen, getRandom, getStdGen, evalRand)
 import qualified Data.UUID as UUID
+import Control.DeepSeq (deepseq)
 
 type Parser = Parsec Void T.Text
 
@@ -126,7 +127,7 @@ instance Assembler PrintingAssembler where
 
 splitLines :: [Line] -> ([Instr], Map.Map String Int)
 splitLines = helper 0 ([], Map.empty) where
-  helper _ r [] = r
+  helper _ (is, m) [] = (reverse is, m)
   helper lineNum (is, m) (InstrLine i:t) = helper (lineNum+1) (i:is, m) t
   helper lineNum (is, m) (LabelLine l:t) = helper lineNum (is, Map.insert l lineNum m) t
 
@@ -142,7 +143,9 @@ assemble regAllocs lines = let (instrs, labels) = splitLines lines in mapM_ (ass
 
 main :: IO ()
 main = do
+  putStrLn "enter program then ctrl D:"
   userCode <- getContents
+  userCode `deepseq` (putStrLn "result:")
   let parsedCode = either (error . errorBundlePretty) id $ parse code "" $ T.pack userCode
   g <- getStdGen
   let lines = evalRand (codeToLines (Set.fromList ["add", "set"]) parsedCode) g

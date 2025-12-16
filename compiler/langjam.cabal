@@ -4,5 +4,5 @@ version:             0.1.0.0
 build-type:          Simple
 executable langjam
   main-is:             langjam.hs
-  build-depends:       base, megaparsec, containers, text, mtl, uuid, MonadRandom
+  build-depends:       base, megaparsec, containers, text, mtl, uuid, MonadRandom, deepseq
   default-language:    Haskell2010
