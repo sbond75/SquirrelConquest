@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards, TupleSections, OverloadedStrings, TypeSynonymInstances, FlexibleInstances, GeneralizedNewtypeDeriving, BlockArguments #-}
+{-# LANGUAGE RecordWildCards, TupleSections, OverloadedStrings, TypeSynonymInstances, FlexibleInstances, GeneralizedNewtypeDeriving, BlockArguments, FlexibleContexts #-}
 
 import Text.Megaparsec
 import Text.Megaparsec.Char
@@ -7,29 +7,33 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Void (Void)
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, catMaybes, fromMaybe)
 import Data.Either (either)
 import Data.Functor.Identity (runIdentity)
-import Control.Monad.State (evalState, execState, modify, gets)
+import Control.Monad.State (evalState, execState, execStateT, modify, gets, get)
 import Control.Monad.Random (Rand, StdGen, getRandom, getStdGen, evalRand)
+import Control.Monad.Trans (lift)
 import qualified Data.UUID as UUID
 import Control.DeepSeq (deepseq)
+import Control.Monad.Tardis
+import Control.Arrow (first, second)
+import Data.Foldable (fold)
 
 type Parser = Parsec Void T.Text
 
-data Expr = NumLit Int | VarExpr String
-data Instr = Instr { instrName :: String, instrArgs :: [Expr] }
-data Line = InstrLine Instr | LabelLine String
+data Expr = NumLit Int | VarExpr String deriving (Show)
+data Instr = Instr { instrName :: String, instrArgs :: [Expr] } deriving (Show)
+data Line = InstrLine Instr | LabelLine String deriving (Show)
 
-data ArgType = RArg | WArg | RWArg
-data MacroArg = MacroArg { macroArgType :: ArgType, macroArgName :: String }
-data MacroDecl = MacroDecl { macroName :: String, macroArgs :: [MacroArg], macroBody :: [Line] }
+data ArgType = RArg | WArg | RWArg | IntArg deriving (Show)
+data MacroArg = MacroArg { macroArgType :: ArgType, macroArgName :: String } deriving (Show)
+data MacroDecl = MacroDecl { macroName :: String, macroArgs :: [MacroArg], macroBody :: [Line] } deriving (Show)
 
-data Decl = DeclMacro MacroDecl
+data Decl = DeclMacro MacroDecl deriving (Show)
 
-data Code = Code [Decl]
+data Code = Code [Decl] deriving (Show)
 
-data HardwareRegister = V0 | V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | VA | VB | VC | VD | VE | VF deriving (Enum, Bounded, Show) -- nice
+data HardwareRegister = V0 | V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | VA | VB | VC | VD | VE | VF deriving (Eq, Ord, Enum, Bounded, Show) -- nice
 
 -- TODO I don't trust this:
 lexeme :: Parser a -> Parser a
@@ -114,8 +118,53 @@ codeToLines builtins (Code declList) = macroBody <$> getMacro "main" where
   declMap = Map.fromList $ (\d -> (macroName d, d)) <$> macroDeclList
   globalExcl = Set.empty
 
-regAlloc :: [Line] -> Maybe (Map.Map String HardwareRegister)
-regAlloc l = Just $ Map.fromList $ (,V0) <$> concatMap (Set.toList . getVars) l -- TODO lol it just does V0 for everything
+regAllocGatherReadWrites :: Map.Map String [ArgType] -> [Line] -> Map.Map String (Set.Set Int, Set.Set Int)
+regAllocGatherReadWrites instrTypes l = snd $ execState (mapM_ helper l) (0, Map.empty) where
+  helper (InstrLine (Instr {..})) = do
+    let argTypes = fromJust $ Map.lookup instrName instrTypes
+    mapM_ processArg $ zip instrArgs argTypes
+    modify $ first (+1)
+  helper _ = pure ()
+  getLineNum = gets fst
+  processArg (VarExpr v, RArg) = getLineNum >>= modify . second . modifyMap first v
+  processArg (VarExpr v, WArg) = getLineNum >>= modify . second . modifyMap second v
+  processArg (v, RWArg) = processArg (v, RArg) >> processArg (v, WArg)
+  processArg _ = pure ()
+  modifyMap modFn var lineNum = Map.alter (Just . modFn (Set.insert lineNum) . fromMaybe (Set.empty, Set.empty)) var
+
+regAllocGetLivenessOneReg :: Set.Set Int -> Set.Set Int -> Set.Set Int
+regAllocGetLivenessOneReg reads writes | Set.null reads && Set.null writes = Set.empty
+regAllocGetLivenessOneReg reads writes = Set.fromList . catMaybes $ evalTardis (mapM helper [firstLine..lastLine]) (undefined, ()) where
+  readsAndWrites = Set.union reads writes
+  firstLine = Set.findMin readsAndWrites
+  lastLine = Set.findMax readsAndWrites
+  helper lineNum = do
+    let read = Set.member lineNum reads
+    let write = Set.member lineNum writes
+    if read then sendPast True else if write then sendPast False else pure ()
+    nextIsRead <- getFuture
+    pure $ if (read || write || nextIsRead) then Just lineNum else Nothing
+
+regAllocGetLivenessPerLine :: Map.Map String (Set.Set Int) -> Map.Map Int (Set.Set String)
+regAllocGetLivenessPerLine regLivenesses = Map.unionsWith (Set.union) regMaps where
+  regMaps = regMap <$> Map.toList regLivenesses
+  regMap (reg, lines) = let set = Set.singleton reg in Map.fromList $ (, set) <$> Set.toList lines
+
+regAlloc :: Map.Map String [ArgType] -> [Line] -> Maybe (Map.Map String HardwareRegister)
+regAlloc instrTypes l = execStateT (mapM_ handleReg regList) Map.empty where
+  readWrites = regAllocGatherReadWrites instrTypes l
+  regLivenesses = uncurry regAllocGetLivenessOneReg <$> readWrites
+  livenessPerLine = regAllocGetLivenessPerLine regLivenesses
+  regList = Map.keys readWrites -- TODO minor hack
+  allRegs = Set.fromList [minBound..maxBound]
+  handleReg reg = do
+    currentMap <- get
+    let allLines = fromMaybe Set.empty $ Map.lookup reg regLivenesses
+    let allOverlaps = Set.delete reg $ fold $ catMaybes $ flip Map.lookup livenessPerLine <$> Set.toList allLines
+    let allOverlapsHardware = Set.fromList $ catMaybes $ flip Map.lookup currentMap <$> Set.toList allOverlaps
+    let hardwarePossibilities = Set.difference allRegs allOverlapsHardware
+    hardware <- lift $ Set.lookupMin hardwarePossibilities
+    modify (Map.insert reg hardware)
 
 class Assembler m where
   emitInstr :: String -> [Either HardwareRegister Int] -> m ()
@@ -145,10 +194,13 @@ main :: IO ()
 main = do
   putStrLn "enter program then ctrl D:"
   userCode <- getContents
-  userCode `deepseq` (putStrLn "result:")
+  userCode `deepseq` pure ()
   let parsedCode = either (error . errorBundlePretty) id $ parse code "" $ T.pack userCode
   g <- getStdGen
   let lines = evalRand (codeToLines (Set.fromList ["add", "set"]) parsedCode) g
-  let regs = fromJust $ regAlloc lines
+  putStrLn "inlined:"
+  print lines
+  let regs = fromJust $ regAlloc (Map.fromList [("add", [RWArg, RArg]), ("set", [RWArg, RArg])]) lines
+  putStrLn "assembly:"
   runPrintingAssembler $ assemble regs lines
   putStrLn ""
