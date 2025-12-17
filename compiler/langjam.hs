@@ -110,13 +110,16 @@ inlineAllMacros builtins globalExcl decls decl = (\newBody -> decl { macroBody =
   replaceLine (InstrLine instr) | not (instrName instr `Set.member` builtins) = decls (instrName instr) >>= inlineMacro globalExcl (instrArgs instr)
   replaceLine line = pure [line]
 
-codeToLines :: (VarGen m, Monad m) => Set.Set String -> Code -> m [Line]
-codeToLines builtins (Code declList) = macroBody <$> getMacro "main" where
-  getMacro = inlineAllMacros builtins globalExcl getMacro . lookupDeclMap
+fullyInlineCodeMacro :: (VarGen m, Monad m) => Set.Set String -> Code -> String -> m MacroDecl
+fullyInlineCodeMacro builtins (Code declList) = f where
+  f = inlineAllMacros builtins globalExcl f . lookupDeclMap
   lookupDeclMap m = fromJust $ Map.lookup m declMap
   macroDeclList = (\(DeclMacro d) -> d) <$> declList
   declMap = Map.fromList $ (\d -> (macroName d, d)) <$> macroDeclList
   globalExcl = Set.empty
+
+codeToLines :: (VarGen m, Monad m) => Set.Set String -> Code -> m [Line]
+codeToLines builtins code = macroBody <$> fullyInlineCodeMacro builtins code "main"
 
 regAllocGatherReadWrites :: Map.Map String [ArgType] -> [Line] -> Map.Map String (Set.Set Int, Set.Set Int)
 regAllocGatherReadWrites instrTypes l = snd $ execState (mapM_ helper l) (0, Map.empty) where
