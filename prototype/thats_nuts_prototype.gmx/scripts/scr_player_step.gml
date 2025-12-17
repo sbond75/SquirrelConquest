@@ -1,61 +1,109 @@
 var moveSpeed;
 moveSpeed = 1
 
-move_player(moveSpeed)
-
-//////////////
-
-// Check wrap
-if tileX < 0 {
-    tileX = 0
-}
-if tileX >= global.mapWidth {
-    tileX = global.mapWidth - 1
-}
-if tileY < 0 {
-    tileY = 0
-}
-if tileY >= global.mapHeight {
-    tileY = global.mapHeight - 1
-}
-
-//////////////
-
-var mytile;
-mytile = get_tile(tileX, tileY)
-
-// Check for branches
-if keyboard_check_pressed(vk_space) && mytile == global.tileTBranch {
-    onBranch = !onBranch
-}
-
-// Check for walking over acorn
-// Look for an acorn instance exactly on this tile
-var nut;
-nut = collision_rectangle(
-    bbox_left,
-    bbox_top,
-    bbox_right,
-    bbox_bottom,
-    obj_nut,
-    false,  // precise = false (bbox is fine and cheaper)
-    false   // notme = false (player is not obj_nut anyway)
-);
-if nut != noone and !acorn {
-    // Auto pick up
-    acorn = true
+if stateFrames == 0 {
+    move_player(moveSpeed)
     
-    // Destroy the acorn
-    acorn_destroy(nut)
+    //////////////
+    
+    // Check wrap
+    if tileX < 0 {
+        tileX = 0
+    }
+    if tileX >= global.mapWidth {
+        tileX = global.mapWidth - 1
+    }
+    if tileY < 0 {
+        tileY = 0
+    }
+    if tileY >= global.mapHeight {
+        tileY = global.mapHeight - 1
+    }
+    
+    // Apply movement to sprite/obj
+    x = tileX * global.tileSize
+    y = tileY * global.tileSize
+    
+    //////////////
+    
+    var mytile;
+    mytile = get_tile(tileX, tileY)
+    
+    // Check for branches
+    if keyboard_check_pressed(vk_space) && mytile == global.tileTBranch {
+        onBranch = !onBranch
+    }
+    
+    // Check for walking over acorn
+    // Look for an acorn instance exactly on this tile
+    var nut;
+    nut = collision_rectangle(
+        bbox_left,
+        bbox_top,
+        bbox_right,
+        bbox_bottom,
+        obj_nut,
+        false,  // precise = false (bbox is fine and cheaper)
+        false   // notme = false (player is not obj_nut anyway)
+    );
+    if nut != noone and nut.buried == false and !acorn {
+        // Auto pick up
+        acorn = true
+        
+        // Destroy the acorn
+        acorn_destroy(tileX, tileY)
+    }
 }
 
+// Check for in-progress action processing
+if stateFrames > 0 {
+    // Update time left
+    stateFrames--
+    
+    if stateFrames == 0 {
+        // On finished:
+        // Perform the action:
+        if acorn && !eating {
+            // Burying
+            acorn_create(tileX, tileY, true)
+            
+            acorn = false
+        }
+        else if !acorn && !eating {
+            // Digging up
+            acorn = true
+            
+            acorn_destroy(tileX, tileY)
+        }
+        else if eating {
+            // Eating
+            eating = false
+            acorn = false
+            if hp < 3 {
+                hp++
+            }
+        }
+    }
+}
 // Check for acorn bury or dig up
-if keyboard_check_pressed(ord("E")) {
-    if !onBranch and acorn and mytile == global.tileTAir {
+else if keyboard_check_pressed(ord("E")) && stateFrames == 0 {
+    // Look for an acorn instance exactly on this tile
+    var nut;
+    nut = collision_rectangle(
+        bbox_left,
+        bbox_top,
+        bbox_right,
+        bbox_bottom,
+        obj_nut,
+        false,  // precise = false (bbox is fine and cheaper)
+        false   // notme = false (player is not obj_nut anyway)
+    );
+    
+    if !onBranch and acorn and mytile == global.tileTAir and nut == noone {
         // Bury
         stateFrames = 5
     }
-    else if !onBranch and !acorn and mytile == global.tileTNut {
+    else if !onBranch and !acorn and nut != noone and nut.buried == true {
         // Dig up acorn
         stateFrames = 5
     }
@@ -70,7 +118,3 @@ if keyboard_check_pressed(ord("E")) {
 
 
 //////////
-
-// Apply movement to sprite/obj
-x = tileX * global.tileSize
-y = tileY * global.tileSize

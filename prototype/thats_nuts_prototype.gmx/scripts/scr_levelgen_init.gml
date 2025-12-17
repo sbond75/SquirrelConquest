@@ -92,7 +92,7 @@ for (i = 0; i < n; i += 1)
 // -----------------------------------------------------------------------------
 
 var tileSize;
-tileSize = 16; // tile size in pixels, adjust to your game
+tileSize = global.tileSize; // tile size in pixels
 
 var branchNutChance;
 var randomNutChance;
