@@ -15,9 +15,9 @@ import Control.Monad.Random (Rand, StdGen, getRandom, getStdGen, evalRand)
 import Control.Monad.Trans (lift)
 import qualified Data.UUID as UUID
 import Control.DeepSeq (deepseq)
-import Control.Monad.Tardis
 import Control.Arrow (first, second)
 import Data.Foldable (fold)
+import Control.Monad (when)
 
 type Parser = Parsec Void T.Text
 
@@ -25,7 +25,7 @@ data Expr = NumLit Int | VarExpr String deriving (Show)
 data Instr = Instr { instrName :: String, instrArgs :: [Expr] } deriving (Show)
 data Line = InstrLine Instr | LabelLine String deriving (Show)
 
-data ArgType = RArg | WArg | RWArg | IntArg deriving (Show)
+data ArgType = RArg | WArg | RWArg | IntArg | LabelArg deriving (Show)
 data MacroArg = MacroArg { macroArgType :: ArgType, macroArgName :: String } deriving (Show)
 data MacroDecl = MacroDecl { macroName :: String, macroArgs :: [MacroArg], macroBody :: [Line] } deriving (Show)
 
@@ -135,29 +135,55 @@ regAllocGatherReadWrites instrTypes l = snd $ execState (mapM_ helper l) (0, Map
   processArg _ = pure ()
   modifyMap modFn var lineNum = Map.alter (Just . modFn (Set.insert lineNum) . fromMaybe (Set.empty, Set.empty)) var
 
-regAllocGetLivenessOneReg :: Set.Set Int -> Set.Set Int -> Set.Set Int
-regAllocGetLivenessOneReg reads writes | Set.null reads && Set.null writes = Set.empty
-regAllocGetLivenessOneReg reads writes = Set.fromList . catMaybes $ evalTardis (mapM helper [firstLine..lastLine]) (undefined, ()) where
-  readsAndWrites = Set.union reads writes
-  firstLine = Set.findMin readsAndWrites
-  lastLine = Set.findMax readsAndWrites
-  helper lineNum = do
-    let read = Set.member lineNum reads
-    let write = Set.member lineNum writes
-    if read then sendPast True else if write then sendPast False else pure ()
-    nextIsRead <- getFuture
-    pure $ if (read || write || nextIsRead) then Just lineNum else Nothing
+regAllocGetInterestsPerLine :: Map.Map Int (Set.Set String) -> Map.Map Int (Set.Set String) -> Map.Map Int (Set.Set Int) -> Map.Map Int (Set.Set Int) -> Int -> Map.Map Int (Set.Set String)
+regAllocGetInterestsPerLine reads writes sources targets codeLen = fst $ execState helper (Map.empty, Set.fromList [0..codeLen-1]) where
+  helper = do
+    q <- gets snd
+    maybe (pure ()) helper' $ Set.lookupMax q
 
-regAllocGetLivenessPerLine :: Map.Map String (Set.Set Int) -> Map.Map Int (Set.Set String)
-regAllocGetLivenessPerLine regLivenesses = Map.unionsWith (Set.union) regMaps where
-  regMaps = regMap <$> Map.toList regLivenesses
-  regMap (reg, lines) = let set = Set.singleton reg in Map.fromList $ (, set) <$> Set.toList lines
+  helper' lineNum = do
+    let getLine = \l -> gets $ Map.findWithDefault Set.empty l . fst
+    modify $ second $ Set.delete lineNum
+    interests <- fold <$> mapM getLine (Set.toList $ getTargets lineNum)
+    let interests' = Set.union (getReadVars lineNum) (Set.difference interests $ getWrittenVars lineNum)
+    interestsChanged <- (interests' /=) <$> getLine lineNum
+    when interestsChanged $ do
+      modify $ first $ Map.insert lineNum interests'
+      modify $ second $ Set.union $ getSources lineNum
 
-regAlloc :: Map.Map String [ArgType] -> [Line] -> Maybe (Map.Map String HardwareRegister)
+  getReadVars = flip (Map.findWithDefault Set.empty) reads
+  getWrittenVars = flip (Map.findWithDefault Set.empty) writes
+  getSources l = Map.findWithDefault Set.empty l sources
+  getTargets l = Map.findWithDefault Set.empty l targets
+
+splitLines :: [Line] -> ([Instr], Map.Map String Int)
+splitLines = helper 0 ([], Map.empty) where
+  helper _ (is, m) [] = (reverse is, m)
+  helper lineNum (is, m) (InstrLine i:t) = helper (lineNum+1) (i:is, m) t
+  helper lineNum (is, m) (LabelLine l:t) = helper lineNum (is, Map.insert l lineNum m) t
+
+computeTargets :: Map.Map String ([ArgType], Maybe (Set.Set Int)) -> [Line] -> Map.Map Int (Set.Set Int)
+computeTargets instrTypes l = toIntMap $ helper <$> (zip [0..] instrs) where
+  toIntMap = Map.fromList . zip [0..]
+  (instrs, lbls) = splitLines l
+  helper (lineNum, Instr{..}) = let (argTypes, inherent) = instrTypes Map.! instrName in Set.union (Set.fromList $ catMaybes $ fmap labelArg $ zip argTypes instrArgs) (Set.map (lineNum +) $ fromMaybe (Set.singleton 1) inherent)
+  labelArg (LabelArg, VarExpr v) = Map.lookup v lbls
+  labelArg _ = Nothing
+
+invertGraph :: (Ord a, Ord b) => Map.Map a (Set.Set b) -> Map.Map b (Set.Set a)
+invertGraph = Map.unionsWith (<>) . fmap helper . Map.toList where
+  helper (x, ys) = Map.fromList $ zip (Set.toList ys) $ fmap Set.singleton $ repeat x
+
+regAlloc :: Map.Map String ([ArgType], Maybe (Set.Set Int)) -> [Line] -> Maybe (Map.Map String HardwareRegister)
 regAlloc instrTypes l = execStateT (mapM_ handleReg regList) Map.empty where
-  readWrites = regAllocGatherReadWrites instrTypes l
-  regLivenesses = uncurry regAllocGetLivenessOneReg <$> readWrites
-  livenessPerLine = regAllocGetLivenessPerLine regLivenesses
+  readWrites = regAllocGatherReadWrites (fst <$> instrTypes) l
+  lineToReads = invertGraph $ fst <$> readWrites
+  lineToWrites = invertGraph $ snd <$> readWrites
+  targets = computeTargets instrTypes l
+  sources = invertGraph targets
+  interestsPerLine = regAllocGetInterestsPerLine lineToReads lineToWrites targets sources (length l)
+  livenessPerLine = Map.unionsWith (<>) [interestsPerLine, lineToReads, lineToWrites]
+  regLivenesses = invertGraph livenessPerLine
   regList = Map.keys readWrites -- TODO minor hack
   allRegs = Set.fromList [minBound..maxBound]
   handleReg reg = do
@@ -176,12 +202,6 @@ newtype PrintingAssembler t = PrintingAssembler { runPrintingAssembler :: IO t }
 
 instance Assembler PrintingAssembler where
   emitInstr s l = PrintingAssembler $ putStrLn (show s <> " " <> show l)
-
-splitLines :: [Line] -> ([Instr], Map.Map String Int)
-splitLines = helper 0 ([], Map.empty) where
-  helper _ (is, m) [] = (reverse is, m)
-  helper lineNum (is, m) (InstrLine i:t) = helper (lineNum+1) (i:is, m) t
-  helper lineNum (is, m) (LabelLine l:t) = helper lineNum (is, Map.insert l lineNum m) t
 
 assembleLine :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> Map.Map String Int -> Instr -> m ()
 assembleLine regAllocs labels (Instr {..}) = emitInstr instrName $ processArg <$> instrArgs where
@@ -203,7 +223,7 @@ main = do
   let lines = evalRand (codeToLines (Set.fromList ["add", "set"]) parsedCode) g
   putStrLn "inlined:"
   print lines
-  let regs = fromJust $ regAlloc (Map.fromList [("add", [RWArg, RArg]), ("set", [RWArg, RArg])]) lines
+  let regs = fromJust $ regAlloc (Map.fromList [("add", ([RWArg, RArg], Nothing)), ("set", ([RWArg, RArg], Nothing))]) lines
   putStrLn "assembly:"
   runPrintingAssembler $ assemble regs lines
   putStrLn ""
