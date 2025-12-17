@@ -6,7 +6,7 @@ tileY = argument1
 var tileSize;
 tileSize = global.tileSize
 
- // Remove from global.nuts by setting the entry to noone
+// Remove from global.nuts by setting the entry to noone
 var i;
 var enemy;
 enemy = noone
@@ -28,4 +28,20 @@ if enemy == noone {
 with (enemy)
 {
     instance_destroy();
+}
+
+// Check victory
+var i;
+var enemy;
+enemy = noone
+for (i = 0; i < global.enemyCounter; i += 1)
+{
+    if (global.enemies[i] != noone)
+    {
+        enemy = global.enemies[i]
+        break;
+    }
+}
+if enemy == noone {
+    show_message("Victory!")
 }
