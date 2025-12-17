@@ -6,26 +6,6 @@ if stateFrames == 0 {
     
     //////////////
     
-    // Check wrap
-    if tileX < 0 {
-        tileX = 0
-    }
-    if tileX >= global.mapWidth {
-        tileX = global.mapWidth - 1
-    }
-    if tileY < 0 {
-        tileY = 0
-    }
-    if tileY >= global.mapHeight {
-        tileY = global.mapHeight - 1
-    }
-    
-    // Apply movement to sprite/obj
-    x = tileX * global.tileSize
-    y = tileY * global.tileSize
-    
-    //////////////
-    
     var mytile;
     mytile = get_tile(tileX, tileY)
     

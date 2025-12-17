@@ -33,6 +33,20 @@ if (dx != 0 || dy != 0)
 
     newX = tileX + dx;
     newY = tileY + dy;
+    
+    // Check wrap
+    if newX < 0 {
+        newX = 0
+    }
+    if newX >= global.mapWidth {
+        newX = global.mapWidth - 1
+    }
+    if newY < 0 {
+        newY = 0
+    }
+    if newY >= global.mapHeight {
+        newY = global.mapHeight - 1
+    }
 
     // When not on a branch, move freely.
     // When on a branch, only allow moving onto another branch tile.
@@ -43,3 +57,6 @@ if (dx != 0 || dy != 0)
     }
 }
 
+// Apply movement to sprite/obj
+x = tileX * global.tileSize
+y = tileY * global.tileSize
