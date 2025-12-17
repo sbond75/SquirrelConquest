@@ -1,2 +1,3 @@
 /src/Game/*.ch8
 /compiler/dist-newstyle
+/compiler/game.ch8

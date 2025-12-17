@@ -18,10 +18,11 @@ import Control.DeepSeq (deepseq)
 import Control.Arrow (first, second)
 import Data.Foldable (fold)
 import Control.Monad (when)
-import Data.Word (Word16)
-import Data.Bits (shiftL, (.|.))
+import Data.Word (Word16, Word8)
+import Data.Bits (shiftL, shiftR, (.|.))
 import Control.Monad.Writer (Writer, runWriter, tell)
 import Numeric (showHex)
+import qualified Data.ByteString as BS
 
 type Parser = Parsec Void T.Text
 
@@ -238,6 +239,12 @@ renderMachineInstrs instrs = fmap helper where
 machineInstrs :: Map.Map String MachineInstr
 machineInstrs = Map.fromList [("add", MachineInstr 0x8004 2), ("set", MachineInstr 0x8000 2)]
 
+w16to8 :: Word16 -> (Word8, Word8)
+w16to8 w = (fromIntegral $ shiftR w 8, fromIntegral w)
+
+w16to8s :: [Word16] -> [Word8]
+w16to8s = concatMap ((\(a,b) -> [a,b]) . w16to8)
+
 main :: IO ()
 main = do
   putStrLn "enter program then ctrl D:"
@@ -252,5 +259,8 @@ main = do
   putStrLn "assembly:"
   print $ runAssemblerBase $ assemble regs lines
   putStrLn "machine:"
-  print $ fmap (flip showHex "") $ renderMachineInstrs machineInstrs $ runAssemblerBase $ assemble regs lines
+  let machine = w16to8s $ renderMachineInstrs machineInstrs $ runAssemblerBase $ assemble regs lines
+  print $ fmap (flip showHex "") $ machine
+  BS.writeFile "game.ch8" $ BS.pack machine
+  putStrLn "wrote file"
   putStrLn ""
