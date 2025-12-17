@@ -18,6 +18,10 @@ import Control.DeepSeq (deepseq)
 import Control.Arrow (first, second)
 import Data.Foldable (fold)
 import Control.Monad (when)
+import Data.Word (Word16)
+import Data.Bits (shiftL, (.|.))
+import Control.Monad.Writer (Writer, runWriter, tell)
+import Numeric (showHex)
 
 type Parser = Parsec Void T.Text
 
@@ -198,11 +202,15 @@ regAlloc instrTypes l = execStateT (mapM_ handleReg regList) Map.empty where
 class Assembler m where
   emitInstr :: String -> [Either HardwareRegister Int] -> m ()
 
-newtype PrintingAssembler t = PrintingAssembler { runPrintingAssembler :: IO t } deriving (Functor, Applicative, Monad)
+newtype AssemblerBase t = AssemblerBase { assemblerBase :: Writer [(String, [Either HardwareRegister Int])] t } deriving (Functor, Applicative, Monad)
 
-instance Assembler PrintingAssembler where
-  emitInstr s l = PrintingAssembler $ putStrLn (show s <> " " <> show l)
+instance Assembler AssemblerBase where
+  emitInstr s l = AssemblerBase $ tell [(s, l)]
 
+runAssemblerBase :: AssemblerBase () -> [(String, [Either HardwareRegister Int])]
+runAssemblerBase = snd . runWriter . assemblerBase
+
+-- TODO endianness
 assembleLine :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> Map.Map String Int -> Instr -> m ()
 assembleLine regAllocs labels (Instr {..}) = emitInstr instrName $ processArg <$> instrArgs where
   processArg (NumLit n) = Right n
@@ -212,6 +220,23 @@ assembleLine regAllocs labels (Instr {..}) = emitInstr instrName $ processArg <$
 
 assemble :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> [Line] -> m ()
 assemble regAllocs lines = let (instrs, labels) = splitLines lines in mapM_ (assembleLine regAllocs labels) instrs
+
+data MachineInstr = MachineInstr { baseBytes :: Word16, argStartLoc :: Int }
+
+renderMachineInstr :: MachineInstr -> [Either HardwareRegister Int] -> Word16
+renderMachineInstr (MachineInstr{..}) = foldl (.|.) baseBytes . fmap processArg . zip [0..] where
+  -- each increment of argNum we shift 4 less
+  -- argStartLoc 1 corresponds to XAAA, meaning we shift 3*4, and each additional we shift 4 less, so 4*(4-argStartLoc)
+  processArg (argNum, Left v) = shiftL (fromIntegral $ fromEnum v) (4*(4-argStartLoc-argNum))
+  -- number values are all the way to the right, so we don't need to worry about shifting them; additional space changes their max value, not their shift amt
+  processArg (_, Right n) = fromIntegral n
+
+renderMachineInstrs :: Map.Map String MachineInstr -> [(String, [Either HardwareRegister Int])] -> [Word16]
+renderMachineInstrs instrs = fmap helper where
+  helper (name, args) = renderMachineInstr (instrs Map.! name) args
+
+machineInstrs :: Map.Map String MachineInstr
+machineInstrs = Map.fromList [("add", MachineInstr 0x8004 2), ("set", MachineInstr 0x8000 2)]
 
 main :: IO ()
 main = do
@@ -225,5 +250,7 @@ main = do
   print lines
   let regs = fromJust $ regAlloc (Map.fromList [("add", ([RWArg, RArg], Nothing)), ("set", ([RWArg, RArg], Nothing))]) lines
   putStrLn "assembly:"
-  runPrintingAssembler $ assemble regs lines
+  print $ runAssemblerBase $ assemble regs lines
+  putStrLn "machine:"
+  print $ fmap (flip showHex "") $ renderMachineInstrs machineInstrs $ runAssemblerBase $ assemble regs lines
   putStrLn ""
