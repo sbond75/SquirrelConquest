@@ -19,8 +19,10 @@
     <script>scripts\scr_player_init.gml</script>
     <script>scripts\scr_player_step.gml</script>
     <script>scripts\scr_player_draw.gml</script>
+    <script>scripts\scr_enemy_init.gml</script>
     <script>scripts\scr_levelgen_init.gml</script>
     <script>scripts\scr_level_init.gml</script>
+    <script>scripts\scr_level_step.gml</script>
     <script>scripts\scr_level_draw.gml</script>
     <script>scripts\set_tile.gml</script>
     <script>scripts\get_tile.gml</script>
@@ -28,6 +30,9 @@
     <script>scripts\scr_nut_init.gml</script>
     <script>scripts\acorn_destroy.gml</script>
     <script>scripts\acorn_create.gml</script>
+    <script>scripts\move_to_player.gml</script>
+    <script>scripts\damage_player.gml</script>
+    <script>scripts\game_over.gml</script>
   </scripts>
   <objects name="objects">
     <object>objects\obj_squirrel</object>
