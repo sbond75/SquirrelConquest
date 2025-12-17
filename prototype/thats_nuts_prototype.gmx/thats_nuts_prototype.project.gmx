@@ -31,8 +31,11 @@
     <script>scripts\acorn_destroy.gml</script>
     <script>scripts\acorn_create.gml</script>
     <script>scripts\move_to_player.gml</script>
+    <script>scripts\move_idle.gml</script>
     <script>scripts\damage_player.gml</script>
     <script>scripts\game_over.gml</script>
+    <script>scripts\acorn_throw.gml</script>
+    <script>scripts\enemy_destroy.gml</script>
   </scripts>
   <objects name="objects">
     <object>objects\obj_squirrel</object>

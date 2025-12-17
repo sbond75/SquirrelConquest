@@ -65,7 +65,7 @@ if stateFrames > 0 {
         // Perform the action:
         if acorn && !eating {
             // Burying
-            acorn_create(tileX, tileY, true)
+            acorn_create(tileX, tileY, true, false, 0, 0, false)
             
             acorn = false
         }
@@ -119,7 +119,30 @@ else if keyboard_check_pressed(ord("F")) && stateFrames == 0 && acorn {
     eating = true
     stateFrames = 5
 }
-
+// Check for acorn throw
+else if acorn {
+    var dx;
+    dx=0
+    var dy;
+    dy=0
+    if keyboard_check_pressed(vk_left) {
+        dx -= 1;
+    }
+    if keyboard_check_pressed(vk_right) {
+        dx += 1;
+    }
+    if keyboard_check_pressed(vk_up) {
+        dy -= 1;
+    }
+    if keyboard_check_pressed(vk_down) {
+        dy += 1;
+    }
+    
+    if abs(dx)>0 || abs(dy)>0 {
+        // Throw
+        acorn_throw(self, dx, dy)
+    }
+}
 
 
 //////////

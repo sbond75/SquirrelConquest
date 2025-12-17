@@ -30,3 +30,5 @@ for (i = 0; i < global.numNuts; i += 1)
 {
     global.nuts[i] = noone
 }
+
+global.frameCounter = 0
