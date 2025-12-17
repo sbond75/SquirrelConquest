@@ -21,6 +21,24 @@ excludeRadius = 5;
 var excludeRadiusSq;
 excludeRadiusSq = excludeRadius * excludeRadius;
 
+var excludeRadiusAcorn;
+excludeRadiusAcorn = 1;
+var excludeRadiusSqAcorn;
+excludeRadiusSqAcorn = excludeRadiusAcorn * excludeRadiusAcorn;
+
+var tileSize;
+tileSize = global.tileSize; // tile size in pixels
+
+// Enemy/acorn placement //
+var mx;
+var my;
+var branchNutChance;
+var randomNutChance;
+var branchEnemyChance;
+var randomEnemyChance;
+var lim;
+// //
+
 for (i = 0; i < n; i += 1)
 {
     var tileX;
@@ -91,59 +109,191 @@ for (i = 0; i < n; i += 1)
 //    - Higher chance elsewhere on the map
 // -----------------------------------------------------------------------------
 
-var tileSize;
-tileSize = global.tileSize; // tile size in pixels
-
-var branchNutChance;
-var randomNutChance;
-
 // "On branches" less likely than "random around map"
 branchNutChance = 0.01;  // 1% per branch tile
 randomNutChance = 0.02;  // 2% per non-branch tile
 
-var mx;
-var my;
-
-for (my = 0; my < global.mapHeight; my += 1)
-{
-    for (mx = 0; mx < global.mapWidth; mx += 1)
+lim = global.numNuts
+while global.nutCounter < lim {
+    for (my = 0; my < global.mapHeight; my += 1)
     {
-        var tileType;
-        tileType = get_tile(mx, my);
-
-        var chance;
-        chance = 0;
-
-        if (tileType == global.tileTBranch)
+        for (mx = 0; mx < global.mapWidth; mx += 1)
         {
-            chance = branchNutChance;
+            var tileType;
+            tileType = get_tile(mx, my);
+    
+            var chance;
+            chance = 0;
+    
+            if (tileType == global.tileTBranch)
+            {
+                chance = branchNutChance;
+            }
+            else
+            {
+                chance = randomNutChance;
+            }
+            
+            // Check limit
+            if global.nutCounter >= lim {
+                break;
+            }
+            
+            // Skip if center is inside the excluded center kernel
+            var cdx;
+            var cdy;
+            cdx = mx - centerX;
+            cdy = my - centerY;
+            if (cdx * cdx + cdy * cdy <= excludeRadiusSqAcorn)
+            {
+                continue;
+            }
+    
+            if (chance > 0 && random(1) < chance)
+            {
+                // Create acorn aligned to tile
+                var px;
+                var py;
+                px = mx * tileSize;
+                py = my * tileSize;
+    
+                var nutInst;
+                nutInst = instance_create(px, py, obj_nut);
+    
+                // Store in global.nuts as a growing array
+                var nutIndex;
+                nutIndex = global.nutCounter;
+                global.nuts[nutIndex] = nutInst;
+                global.nutCounter++;
+            }
         }
-        else
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 3. Place rattlesnakes
+//    - No chance on branch tiles
+//    - Chance elsewhere on the map
+// -----------------------------------------------------------------------------
+
+randomEnemyChance = 0.015;  // 1.5% per non-branch tile
+
+lim = 2 * global.numEnemies div 4
+while global.enemyCounter < lim {
+    for (my = 0; my < global.mapHeight; my += 1)
+    {
+        for (mx = 0; mx < global.mapWidth; mx += 1)
         {
-            chance = randomNutChance;
+            var tileType;
+            tileType = get_tile(mx, my);
+    
+            var chance;
+            chance = 0;
+    
+            if (tileType == global.tileTAir)
+            {
+                chance = randomEnemyChance;
+            }
+            
+            // Check limit
+            if global.enemyCounter >= lim {
+                break;
+            }
+            
+            // Skip if center is inside the excluded center kernel
+            var cdx;
+            var cdy;
+            cdx = mx - centerX;
+            cdy = my - centerY;
+            if (cdx * cdx + cdy * cdy <= excludeRadiusSq)
+            {
+                continue;
+            }
+    
+            if (chance > 0 && random(1) < chance)
+            {
+                // Create enemy aligned to tile
+                var px;
+                var py;
+                px = mx * tileSize;
+                py = my * tileSize;
+    
+                var enemyInst;
+                enemyInst = instance_create(px, py, obj_rattlesnake);
+    
+                // Store in global.enemies as a growing array
+                var enemyIndex;
+                enemyIndex = global.enemyCounter;
+                global.enemies[enemyIndex] = enemyInst;
+                global.enemyCounter++;
+            }
         }
-        
-        // Check limit
-        if global.nutCounter >= global.numNuts {
-            break;
-        }
+    }
+}
 
-        if (chance > 0 && random(1) < chance)
+// -----------------------------------------------------------------------------
+// 3. Place eagles
+//    - Higher chance on branch tiles
+//    - Lower elsewhere on the map
+// -----------------------------------------------------------------------------
+
+// "On branches" more likely than "random around map"
+branchEnemyChance = 0.02;  // 2% per branch tile
+randomEnemyChance = 0.01;  // 1% per non-branch tile
+
+lim = 4 * global.numEnemies div 4
+while global.enemyCounter < lim {
+    for (my = 0; my < global.mapHeight; my += 1)
+    {
+        for (mx = 0; mx < global.mapWidth; mx += 1)
         {
-            // Create acorn aligned to tile
-            var px;
-            var py;
-            px = mx * tileSize;
-            py = my * tileSize;
-
-            var nutInst;
-            nutInst = instance_create(px, py, obj_nut);
-
-            // Store in global.nuts as a growing array
-            var nutIndex;
-            nutIndex = global.nutCounter;
-            global.nuts[nutIndex] = nutInst;
-            global.nutCounter++;
+            var tileType;
+            tileType = get_tile(mx, my);
+    
+            var chance;
+            chance = 0;
+    
+            if (tileType == global.tileTBranch)
+            {
+                chance = branchEnemyChance;
+            }
+            else
+            {
+                chance = randomEnemyChance;
+            }
+            
+            // Check limit
+            if global.enemyCounter >= lim {
+                break;
+            }
+            
+            // Skip if center is inside the excluded center kernel
+            var cdx;
+            var cdy;
+            cdx = mx - centerX;
+            cdy = my - centerY;
+            if (cdx * cdx + cdy * cdy <= excludeRadiusSq)
+            {
+                continue;
+            }
+    
+            if (chance > 0 && random(1) < chance)
+            {
+                // Create enemy aligned to tile
+                var px;
+                var py;
+                px = mx * tileSize;
+                py = my * tileSize;
+    
+                var enemyInst;
+                enemyInst = instance_create(px, py, obj_eagle);
+    
+                // Store in global.enemies as a growing array
+                var enemyIndex;
+                enemyIndex = global.enemyCounter;
+                global.enemies[enemyIndex] = enemyInst;
+                global.enemyCounter++;
+            }
         }
     }
 }

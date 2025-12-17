@@ -114,6 +114,11 @@ else if keyboard_check_pressed(ord("E")) && stateFrames == 0 {
     //    // Drop acorn on enemy
     //}
 }
+// Check for acorn eat
+else if keyboard_check_pressed(ord("F")) && stateFrames == 0 && acorn {
+    eating = true
+    stateFrames = 5
+}
 
 
 

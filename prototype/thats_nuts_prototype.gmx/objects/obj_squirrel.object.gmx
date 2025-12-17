@@ -109,7 +109,11 @@
         <arguments>
           <argument>
             <kind>1</kind>
-            <string>draw_text(0,0,string(tileX) + ", " + string(tileY))
+            <string>draw_text(0,16,string(tileX) + ", " + string(tileY))
+
+var pixelScale;
+pixelScale = 10 * global.tileSize
+draw_rectangle_colour(0,0,hp * pixelScale,pixelScale,c_black,c_black,c_black,c_black,false)
 </string>
           </argument>
         </arguments>
