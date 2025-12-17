@@ -51,7 +51,7 @@ if stateFrames == 0 {
         acorn = true
         
         // Destroy the acorn
-        acorn_destroy(tileX, tileY)
+        acorn_destroy(tileX, tileY, false)
     }
 }
 
@@ -73,7 +73,7 @@ if stateFrames > 0 {
             // Digging up
             acorn = true
             
-            acorn_destroy(tileX, tileY)
+            acorn_destroy(tileX, tileY, false)
         }
         else if eating {
             // Eating

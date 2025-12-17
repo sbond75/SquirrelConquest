@@ -132,7 +132,7 @@ for (i = 0; i < global.nutCounter; i += 1)
                 tileY = nut.tileY
                 //instance_destroy(nut);
                 //global.nuts[i] = noone;
-                acorn_destroy(tileX, tileY)
+                acorn_destroy(tileX, tileY, true)
                 
                 enemy_destroy(tileX, tileY)
                 continue

@@ -35,6 +35,10 @@ for (my = 0; my < global.mapHeight; my += 1)
         {
             spr = spr_branch;
         }
+        else if (t == global.tileTTrunk)
+        {
+            spr = spr_trunk;
+        }
 
         if (spr != noone)
         {

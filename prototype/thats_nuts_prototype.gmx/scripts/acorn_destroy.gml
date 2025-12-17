@@ -2,6 +2,8 @@ var tileX
 tileX = argument0
 var tileY
 tileY = argument1
+var makeNew
+makeNew = argument2
 
 var tileSize;
 tileSize = global.tileSize
@@ -28,4 +30,10 @@ if nut == noone {
 with (nut)
 {
     instance_destroy();
+}
+
+if makeNew {
+    // Make a new one at a random place far away
+    random_pos_away_from_player(10)
+    acorn_create(out_rndPosX, out_rndPosY, false, false, 0, 0, false)
 }

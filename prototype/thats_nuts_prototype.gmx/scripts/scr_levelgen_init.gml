@@ -59,7 +59,7 @@ for (i = 0; i < n; i += 1)
     }
 
     // Center tile (grouped branch "root")
-    set_tile(tileX, tileY, 3);
+    set_tile(tileX, tileY, global.tileTTrunk);
 
     // Place surrounding branches in a circular-ish kernel
     var dx;
@@ -124,6 +124,11 @@ while global.nutCounter < lim {
     
             var chance;
             chance = 0;
+            
+            is_occupied(mx, my, true)
+            if out_isOccupied {
+                continue
+            }
     
             if (tileType == global.tileTBranch)
             {
@@ -189,6 +194,11 @@ while global.enemyCounter < lim {
     
             var chance;
             chance = 0;
+            
+            is_occupied(mx, my, true)
+            if out_isOccupied {
+                continue
+            }
     
             if (tileType == global.tileTAir)
             {
@@ -252,6 +262,11 @@ while global.enemyCounter < lim {
     
             var chance;
             chance = 0;
+            
+            is_occupied(mx, my, true)
+            if out_isOccupied {
+                continue
+            }
     
             if (tileType == global.tileTBranch)
             {

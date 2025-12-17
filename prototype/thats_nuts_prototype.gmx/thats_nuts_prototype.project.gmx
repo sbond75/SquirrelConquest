@@ -12,6 +12,7 @@
     <sprite>sprites\spr_nut</sprite>
     <sprite>sprites\spr_buried_nut</sprite>
     <sprite>sprites\spr_branch</sprite>
+    <sprite>sprites\spr_trunk</sprite>
   </sprites>
   <backgrounds name="background"/>
   <paths name="paths"/>
@@ -28,14 +29,16 @@
     <script>scripts\get_tile.gml</script>
     <script>scripts\move_player.gml</script>
     <script>scripts\scr_nut_init.gml</script>
-    <script>scripts\acorn_destroy.gml</script>
     <script>scripts\acorn_create.gml</script>
+    <script>scripts\acorn_destroy.gml</script>
+    <script>scripts\acorn_throw.gml</script>
     <script>scripts\move_to_player.gml</script>
     <script>scripts\move_idle.gml</script>
     <script>scripts\damage_player.gml</script>
     <script>scripts\game_over.gml</script>
-    <script>scripts\acorn_throw.gml</script>
     <script>scripts\enemy_destroy.gml</script>
+    <script>scripts\random_pos_away_from_player.gml</script>
+    <script>scripts\is_occupied.gml</script>
   </scripts>
   <objects name="objects">
     <object>objects\obj_squirrel</object>

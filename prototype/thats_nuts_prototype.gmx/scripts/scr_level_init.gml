@@ -2,9 +2,10 @@
 global.mapWidth = 32
 global.mapHeight = 32
 
-// 32x32 1D array. 0 = air, 1 = branch
+// 32x32 1D array. 0 = air, 1 = branch, 2 = tree trunk
 global.tileTAir = 0
 global.tileTBranch = 1
+global.tileTTrunk = 1
 global.tilemapSize = global.mapWidth * global.mapHeight
 var i;
 for (i = 0; i < global.tilemapSize; i += 1)
