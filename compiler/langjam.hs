@@ -222,9 +222,10 @@ assembleLine regAllocs labels (Instr {..}) = emitInstr instrName $ processArg <$
 assemble :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> [Line] -> m ()
 assemble regAllocs lines = let (instrs, labels) = splitLines lines in mapM_ (assembleLine regAllocs labels) instrs
 
-data MachineInstr = MachineInstr { baseBytes :: Word16 }
+data MachineInstr = MachineInstr { baseBytes :: Word16 } | FakeInstr ([Either HardwareRegister Int] -> Word16)
 
 renderMachineInstr :: MachineInstr -> [Either HardwareRegister Int] -> Word16
+renderMachineInstr (FakeInstr f) = f
 renderMachineInstr (MachineInstr{..}) = foldl (.|.) baseBytes . fmap processArg . zip [0..] where
   -- each increment of argNum we shift 4 less
   -- we start at position 2 ie <<8
@@ -236,39 +237,44 @@ renderMachineInstrs :: Map.Map String MachineInstr -> [(String, [Either Hardware
 renderMachineInstrs instrs = fmap helper where
   helper (name, args) = renderMachineInstr (instrs Map.! name) args
 
-chip8Instrs :: Map.Map String ([ArgType], Maybe (Set.Set Int), MachineInstr)
+chip8Instrs :: Map.Map String (([ArgType], Maybe (Set.Set Int)), MachineInstr)
 chip8Instrs = Map.fromList
-  [ ("clear", ([], Nothing, MachineInstr 0x00E0))
-  , ("goto", ([LabelArg], Just Set.empty, MachineInstr 0x1000))
-  , ("skipifeqn", ([RArg, IntArg], Just $ Set.fromList [1, 2], MachineInstr 0x3000))
-  , ("skipifneqn", ([RArg, IntArg], Just $ Set.fromList [1, 2], MachineInstr 0x4000))
-  , ("skipifeq", ([RArg, RArg], Just $ Set.fromList [1, 2], MachineInstr 0x5000))
-  , ("setn", ([RWArg, IntArg], Nothing, MachineInstr 0x6000))
-  , ("addn", ([RWArg, IntArg], Nothing, MachineInstr 0x7000))
-  , ("set", ([RWArg, RArg], Nothing, MachineInstr 0x8000))
-  , ("bor", ([RWArg, RArg], Nothing, MachineInstr 0x8001))
-  , ("band", ([RWArg, RArg], Nothing, MachineInstr 0x8002))
-  , ("bxor", ([RWArg, RArg], Nothing, MachineInstr 0x8003))
-  , ("add", ([RWArg, RArg], Nothing, MachineInstr 0x8004))
-  , ("sub", ([RWArg, RArg], Nothing, MachineInstr 0x8005))
-  , ("shr", ([RWArg], Nothing, MachineInstr 0x8006)) -- TODO VF
-  , ("negsub", ([RWArg, RArg], Nothing, MachineInstr 0x8007))
-  , ("shl", ([RWArg], Nothing, MachineInstr 0x800E)) -- TODO VF
-  , ("skipifneq", ([RArg, RArg], Just $ Set.fromList [1, 2], MachineInstr 0x9000))
-  , ("seti", ([IntArg], Nothing, MachineInstr 0xA000)) -- TODO I
-  , ("rand", ([RWArg, IntArg], Nothing, MachineInstr 0xC000))
-  , ("draw", ([RArg, RArg, IntArg], Nothing, MachineInstr 0xD000)) -- TODO I
-  , ("skipifkey", ([RArg], Just $ Set.fromList [1, 2], MachineInstr 0xE09E))
-  , ("skipifnkey", ([RArg], Just $ Set.fromList [1, 2], MachineInstr 0xE0A1))
-  , ("getdelay", ([WArg], Nothing, MachineInstr 0xF007))
-  , ("getkey", ([WArg], Nothing, MachineInstr 0xF00A))
-  , ("setdelay", ([RArg], Nothing, MachineInstr 0xF015))
-  , ("setsound", ([RArg], Nothing, MachineInstr 0xF018))
-  , ("addi", ([RArg], Nothing, MachineInstr 0xF01E)) -- TODO I
-  , ("setisprite", ([RArg], Nothing, MachineInstr 0xF029)) -- TODO I; TODO what is this
-  , ("bcd", ([RArg], Nothing, MachineInstr 0xF033)) -- TODO I
-  , ("regdump", ([RArg], Nothing, MachineInstr 0xF055)) -- TODO TODO TODO, this reads a bunch of regs
-  , ("regload", ([WArg], Nothing, MachineInstr 0xF065)) -- TODO TODO TODO, this writes a bunch of regs
+  [ ("clear", (([], Nothing), MachineInstr 0x00E0))
+  , ("goto", (([LabelArg], Just Set.empty), MachineInstr 0x1000))
+  , ("skipifeqn", (([RArg, IntArg], Just $ Set.fromList [1, 2]), MachineInstr 0x3000))
+  , ("skipifneqn", (([RArg, IntArg], Just $ Set.fromList [1, 2]), MachineInstr 0x4000))
+  , ("skipifeq", (([RArg, RArg], Just $ Set.fromList [1, 2]), MachineInstr 0x5000))
+  , ("setn", (([RArg, IntArg], Nothing), MachineInstr 0x6000))
+  , ("addn", (([RWArg, IntArg], Nothing), MachineInstr 0x7000))
+  , ("set", (([RArg, RArg], Nothing), MachineInstr 0x8000))
+  , ("bor", (([RWArg, RArg], Nothing), MachineInstr 0x8001))
+  , ("band", (([RWArg, RArg], Nothing), MachineInstr 0x8002))
+  , ("bxor", (([RWArg, RArg], Nothing), MachineInstr 0x8003))
+  , ("add", (([RWArg, RArg], Nothing), MachineInstr 0x8004))
+  , ("sub", (([RWArg, RArg], Nothing), MachineInstr 0x8005))
+  , ("shr", (([RWArg], Nothing), MachineInstr 0x8006)) -- TODO VF
+  , ("negsub", (([RWArg, RArg], Nothing), MachineInstr 0x8007))
+  , ("shl", (([RWArg], Nothing), MachineInstr 0x800E)) -- TODO VF
+  , ("skipifneq", (([RArg, RArg], Just $ Set.fromList [1, 2]), MachineInstr 0x9000))
+  , ("seti", (([IntArg], Nothing), MachineInstr 0xA000)) -- TODO I
+  , ("rand", (([RArg, IntArg], Nothing), MachineInstr 0xC000)) -- TODO or w?
+  , ("draw", (([RArg, RArg, IntArg], Nothing), MachineInstr 0xD000)) -- TODO I
+  , ("skipifkey", (([RArg], Just $ Set.fromList [1, 2]), MachineInstr 0xE09E))
+  , ("skipifnkey", (([RArg], Just $ Set.fromList [1, 2]), MachineInstr 0xE0A1))
+  , ("getdelay", (([WArg], Nothing), MachineInstr 0xF007))
+  , ("getkey", (([WArg], Nothing), MachineInstr 0xF00A))
+  , ("setdelay", (([RArg], Nothing), MachineInstr 0xF015))
+  , ("setsound", (([RArg], Nothing), MachineInstr 0xF018))
+  , ("addi", (([RArg], Nothing), MachineInstr 0xF01E)) -- TODO I
+  , ("setisprite", (([RArg], Nothing), MachineInstr 0xF029)) -- TODO I; TODO what is this
+  , ("bcd", (([RArg], Nothing), MachineInstr 0xF033)) -- TODO I
+  -- , ("regdump", ([RArg], Nothing, MachineInstr 0xF055)) -- TODO, this reads a bunch of regs
+  -- , ("regload", ([WArg], Nothing, MachineInstr 0xF065)) -- TODO, this writes a bunch of regs
+  -- workaround hacks (TODO):
+  , ("regdump", (([], Nothing), MachineInstr 0xF055))
+  , ("regload", (([], Nothing), MachineInstr 0xF065))
+  , ("getv0", (([WArg], Nothing), MachineInstr 0x8000))
+  , ("setv0", (([RArg], Nothing), FakeInstr (\[Left reg] -> renderMachineInstr (snd $ chip8Instrs Map.! "set") [Left V0, Left reg])))
   ]
 
 w16to8 :: Word16 -> (Word8, Word8)
@@ -287,11 +293,11 @@ main = do
   let lines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) parsedCode) g
   putStrLn "inlined:"
   print lines
-  let regs = fromJust $ regAlloc ((\(a,b,_) -> (a,b)) <$> chip8Instrs) lines
+  let regs = fromJust $ regAlloc (fst <$> chip8Instrs) lines
   putStrLn "assembly:"
   print $ runAssemblerBase $ assemble regs lines
   putStrLn "machine:"
-  let machine = w16to8s $ renderMachineInstrs ((\(_,_,a) -> a) <$> chip8Instrs) $ runAssemblerBase $ assemble regs lines
+  let machine = w16to8s $ renderMachineInstrs (snd <$> chip8Instrs) $ runAssemblerBase $ assemble regs lines
   print $ fmap (flip showHex "") $ machine
   BS.writeFile "game.ch8" $ BS.pack machine
   putStrLn "wrote file"
