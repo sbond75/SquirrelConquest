@@ -71,12 +71,15 @@ for (i = 0; i < global.enemyCounter; i += 1)
                 move_to_player(enemy, 1);
                 // Don't move too fast:
                 enemy.moveCounter += 5
+                //enemy.moveCounter += 10
             }
             
             // Damage if on top of player
             if (abs(dx) <= 0 && abs(dy) <= 0)
             {
                 damage_player(enemy);
+                // Don't move too fast:
+                enemy.moveCounter += 5
             }
             else {
                 enemy.damagedPlayerFrameCounter++
@@ -87,7 +90,9 @@ for (i = 0; i < global.enemyCounter; i += 1)
                 enemy.canDamagePlayer = true
             }
             
-            enemy.moveCounter--
+            if enemy.moveCounter > 0 {
+                enemy.moveCounter--
+            }
         }
     }
 }
