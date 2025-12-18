@@ -7,3 +7,4 @@ acorn = false
 hp = 3
 stateFrames = 0
 eating = false
+score = 0

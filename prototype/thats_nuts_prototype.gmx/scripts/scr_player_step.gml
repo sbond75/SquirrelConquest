@@ -48,10 +48,12 @@ if stateFrames > 0 {
             acorn_create(tileX, tileY, true, false, 0, 0, false)
             
             acorn = false
+            score++
         }
         else if !acorn && !eating {
             // Digging up
             acorn = true
+            score--
             
             acorn_destroy(tileX, tileY, false)
         }
@@ -95,7 +97,7 @@ else if keyboard_check_pressed(ord("E")) && stateFrames == 0 {
     //}
 }
 // Check for acorn eat
-else if keyboard_check_pressed(ord("F")) && stateFrames == 0 && acorn {
+else if keyboard_check_pressed(ord("F")) && stateFrames == 0 && acorn && hp < 3 {
     eating = true
     stateFrames = 5
 }

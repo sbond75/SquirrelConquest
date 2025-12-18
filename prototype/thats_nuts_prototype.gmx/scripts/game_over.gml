@@ -1,2 +1,2 @@
-show_message("Game over")
+show_message("Game over. Score: " + string(score))
 room_restart()
