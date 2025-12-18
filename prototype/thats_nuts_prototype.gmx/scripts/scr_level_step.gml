@@ -61,12 +61,12 @@ for (i = 0; i < global.enemyCounter; i += 1)
             dx = obj_squirrel.tileX - tileX;
             dy = obj_squirrel.tileY - tileY;
             
-            if enemy.canDamagePlayer and get_tile(tileX, tileY) == global.tileTAir and (global.frameCounter mod 5 == 0) {
+            if enemy.canDamagePlayer and get_tile(tileX, tileY) == global.tileTAir and (global.frameCounter mod 10 == 0) and enemy.moveCounter < 5 {
                 // move idly
                 move_idle(enemy, 1)
             }
             
-            if enemy.canDamagePlayer and enemy.damagedPlayerFrameCounter > 10 and enemy.moveCounter < 5
+            if enemy.canDamagePlayer and enemy.damagedPlayerFrameCounter > 10 and enemy.moveCounter < 5 and (abs(dx) <= 2 && abs(dy) <= 2)
             {
                 move_to_player(enemy, 1);
                 // Don't move too fast:
@@ -82,7 +82,7 @@ for (i = 0; i < global.enemyCounter; i += 1)
                 enemy.damagedPlayerFrameCounter++
             }
             
-            if enemy.damagedPlayerFrameCounter > 3 and (abs(dx) > 2 && abs(dy) > 2)
+            if enemy.damagedPlayerFrameCounter > 3// and (abs(dx) > 2 && abs(dy) > 2)
             {
                 enemy.canDamagePlayer = true
             }
