@@ -230,12 +230,34 @@ runAssemblerBase :: AssemblerBase () -> [(String, [Either HardwareRegister Int])
 runAssemblerBase = snd . runWriter . assemblerBase
 
 -- TODO endianness
-assembleLine :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> Map.Map String Int -> Instr -> m ()
-assembleLine regAllocs labels (Instr {..}) = emitInstr instrName $ processArg <$> instrArgs where
-  processArg (NumLit n) = Right n
-  processArg (VarExpr v) = case (Map.lookup v regAllocs, Map.lookup v labels) of
-    (Just reg, _) -> Left reg
-    (_, Just n) -> Right n
+assembleLine
+  :: (Assembler m, Monad m)
+  => Map.Map String HardwareRegister  -- register allocations
+  -> Map.Map String Int               -- label -> instruction index
+  -> Instr
+  -> m ()
+assembleLine regAllocs labels (Instr {..}) =
+  emitInstr instrName (map processArg instrArgs)
+  where
+    -- Where your emulator loads the program in RAM.
+    -- For wernsey/chip8-style cores this is normally 0x200.
+    programStart :: Int
+    programStart = 0x200
+
+    -- Instruction index -> byte address
+    labelToAddr :: Int -> Int
+    labelToAddr n = programStart + 2 * n
+
+    processArg :: Expr -> Either HardwareRegister Int
+    processArg (NumLit n) = Right n
+    processArg (VarExpr v) =
+      case (Map.lookup v regAllocs, Map.lookup v labels) of
+        -- Variable that was given a hardware register
+        (Just reg, _) -> Left reg
+        -- Label: convert from instruction index to RAM address
+        (_, Just n)   -> Right (labelToAddr n)
+        -- Should not happen if your macros are well-formed
+        _             -> error ("Unknown variable/label: " ++ v)
 
 assemble :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> [Line] -> m ()
 assemble regAllocs lines = let (instrs, labels) = splitLines lines in mapM_ (assembleLine regAllocs labels) instrs
