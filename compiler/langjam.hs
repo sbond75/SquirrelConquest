@@ -51,10 +51,10 @@ instr :: Parser Instr
 instr = Instr <$> (some letterChar <* space1) <*> (sepBy (lexeme expr) (lexeme $ char ',')) <* char ';'
 
 line :: Parser Line
-line = (InstrLine <$> instr) <|> (LabelLine <$> (some letterChar <* char ':'))
+line = (InstrLine <$> instr) <|> (LabelLine <$> (char ':' >> some letterChar <* char ':')) -- TODO labels shouldnt need intitial :
 
 argType :: Parser ArgType
-argType = (char 'r' >> pure RArg) <|> (char 'w' >> pure WArg) <|> (string "rw" >> pure RWArg)
+argType = (char 'r' >> pure RArg) <|> (char 'w' >> pure WArg) <|> (string "rw" >> pure RWArg) <|> (string "int" >> pure IntArg) <|> (string "label" >> pure LabelArg)
 
 macroArg :: Parser MacroArg
 macroArg = MacroArg <$> (argType <* space1) <*> some letterChar
@@ -273,8 +273,8 @@ chip8Instrs = Map.fromList
   -- workaround hacks (TODO):
   , ("regdump", (([], Nothing), MachineInstr 0xF055))
   , ("regload", (([], Nothing), MachineInstr 0xF065))
-  , ("getv0", (([WArg], Nothing), MachineInstr 0x8000))
-  , ("setv0", (([RArg], Nothing), FakeInstr (\[Left reg] -> renderMachineInstr (snd $ chip8Instrs Map.! "set") [Left V0, Left reg])))
+  , ("getzero", (([WArg], Nothing), MachineInstr 0x8000))
+  , ("setzero", (([RArg], Nothing), FakeInstr (\[Left reg] -> renderMachineInstr (snd $ chip8Instrs Map.! "set") [Left V0, Left reg])))
   ]
 
 w16to8 :: Word16 -> (Word8, Word8)

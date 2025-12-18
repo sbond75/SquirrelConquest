@@ -1,0 +1,36 @@
+macro setir(r memLoc) {
+  seti 0;
+  addi memLoc;
+}
+
+macro writeMem(r memLoc, r val) {
+  setir memLoc;
+  setzero val;
+  regdump ;
+}
+
+macro readMem(r memLoc, w val) {
+  setir memLoc;
+  regload ;
+  getzero val;
+}
+
+macro writeMemConst(int memLoc, int val) {
+  seti memLoc;
+  setn v, val;
+  setzero v;
+  regdump ;
+}
+
+macro initMem() {
+  writeMemConst 1000, 7;
+}
+
+macro main() {
+  initMem ;
+  setn x, 10;
+  setn y, 20;
+  draw x, y, 10;
+  :lbl:
+  goto lbl;
+}
