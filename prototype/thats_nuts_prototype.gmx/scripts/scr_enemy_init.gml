@@ -8,3 +8,4 @@ tileY = y / tileSize
 
 canDamagePlayer = true
 damagedPlayerFrameCounter = 0
+moveCounter = 0

@@ -66,9 +66,11 @@ for (i = 0; i < global.enemyCounter; i += 1)
                 move_idle(enemy, 1)
             }
             
-            if enemy.canDamagePlayer and enemy.damagedPlayerFrameCounter > 3 and (abs(dx) <= 2 && abs(dy) <= 2)
+            if enemy.canDamagePlayer and enemy.damagedPlayerFrameCounter > 10 and enemy.moveCounter < 5
             {
                 move_to_player(enemy, 1);
+                // Don't move too fast:
+                enemy.moveCounter += 5
             }
             
             // Damage if on top of player
@@ -84,6 +86,8 @@ for (i = 0; i < global.enemyCounter; i += 1)
             {
                 enemy.canDamagePlayer = true
             }
+            
+            enemy.moveCounter--
         }
     }
 }
