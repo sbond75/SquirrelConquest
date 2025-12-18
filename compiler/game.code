@@ -1,0 +1,106 @@
+macro setir(r memloc) {
+  seti 0;
+  addi memloc;
+}
+
+macro writeMem(r memloc, r val) {
+  setir memloc;
+  setzero val;
+  regdump ;
+}
+
+macro readMem(r memloc, w val) {
+  setir memloc;
+  regload ;
+  getzero val;
+}
+
+macro writeMemConst(int memloc, int val) {
+  seti memloc;
+  setn v, val;
+  setzero v;
+  regdump ;
+}
+
+/*
+  px, py  : player position in pixels (0..63, 0..31)
+  key     : temp register for keypad index
+*/
+
+/* Placeholder: set I to player sprite and draw it at (px, py) */
+macro drawPlayer() {
+  seti 300;             # TODO: put your sprite at I = 300
+  draw px, py, 5;       # TODO: 5 = sprite height in bytes
+}
+
+/*
+  Movement with WASD:
+
+    W -> chip key 5  (up)
+    A -> chip key 7  (left)
+    S -> chip key 8  (down)
+    D -> chip key 9  (right)
+
+  skipifkey vX: skip next instruction if key[vX] is pressed.
+  We use the pattern:
+
+    setn key, N;
+    skipifkey key;   # if pressed, skip goto
+    goto label;      # if not pressed, we jump over movement
+    ... movement ...
+
+*/
+
+macro updatePlayer() {
+  # step size (pixels)
+  setn step, 1;
+
+  # --- LEFT (A -> key index 7) ---
+  setn key, 7;
+  skipifkey key;
+  goto no_left;
+  skipifeqn px, 0;
+  addn px, 255;         # -1 mod 256
+no_left:
+
+  # --- RIGHT (D -> key index 9) ---
+  setn key, 9;
+  skipifkey key;
+  goto no_right;
+  skipifeqn px, 63;     # clamp to screen width 64
+  addn px, 1;
+no_right:
+
+  # --- UP (W -> key index 5) ---
+  setn key, 5;
+  skipifkey key;
+  goto no_up;
+  skipifeqn py, 0;
+  addn py, 255;         # -1
+no_up:
+
+  # --- DOWN (S -> key index 8) ---
+  setn key, 8;
+  skipifkey key;
+  goto no_down;
+  skipifeqn py, 31;     # clamp to screen height 32
+  addn py, 1;
+no_down:
+}
+
+/*
+  Simple main loop:
+  - initialise px, py to the center-ish of the screen
+  - repeatedly clear, draw player, handle input
+*/
+
+macro main() {
+  setn px, 32;          # mid-screen X
+  setn py, 16;          # mid-screen Y
+
+loop:
+  clear ;
+  drawPlayer ;
+  updatePlayer ;
+  goto loop;
+}

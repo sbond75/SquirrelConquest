@@ -41,32 +41,50 @@ data Code = Code [Decl] deriving (Show)
 data HardwareRegister = V0 | V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | VA | VB | VC | VD | VE | VF deriving (Eq, Ord, Enum, Bounded, Show) -- nice
 
 -- TODO I don't trust this:
+-- Treat spaces, # line comments, and /* block comments */ as whitespace
+spaceConsumer :: Parser ()
+spaceConsumer =
+  Lexer.space
+    space1
+    (Lexer.skipLineComment "#")
+    (Lexer.skipBlockComment "/*" "*/")
+
 lexeme :: Parser a -> Parser a
-lexeme = Lexer.lexeme space
+lexeme = Lexer.lexeme spaceConsumer
+
+-- Identifier: [A-Za-z_][A-Za-z0-9_]*
+identifier :: Parser String
+identifier =
+  (:) <$> (letterChar <|> char '_')
+      <*> many (alphaNumChar <|> char '_')
 
 expr :: Parser Expr
-expr = (NumLit . read <$> some digitChar) <|> (VarExpr <$> some letterChar)
+expr = (NumLit . read <$> some digitChar) <|> (VarExpr <$> identifier)
 
 instr :: Parser Instr
-instr = Instr <$> (some letterChar <* space1) <*> (sepBy (lexeme expr) (lexeme $ char ',')) <* char ';'
+instr = Instr <$> (identifier <* space1) <*> (sepBy (lexeme expr) (lexeme $ char ',')) <* char ';'
 
 line :: Parser Line
-line = (InstrLine <$> instr) <|> (LabelLine <$> (char ':' >> some letterChar <* char ':')) -- TODO labels shouldnt need intitial :
+line =
+  try labelLine <|> instrLine
+  where
+    labelLine = LabelLine <$> (identifier <* char ':')
+    instrLine = InstrLine  <$> instr
 
 argType :: Parser ArgType
 argType = (char 'r' >> pure RArg) <|> (char 'w' >> pure WArg) <|> (string "rw" >> pure RWArg) <|> (string "int" >> pure IntArg) <|> (string "label" >> pure LabelArg)
 
 macroArg :: Parser MacroArg
-macroArg = MacroArg <$> (argType <* space1) <*> some letterChar
+macroArg = MacroArg <$> (argType <* space1) <*> identifier
 
 macroDecl :: Parser MacroDecl
-macroDecl = string "macro" >> space1 >> (MacroDecl <$> lexeme (some letterChar) <*> (lexeme (char '(') >> sepBy (lexeme macroArg) (lexeme $ char ',') <* lexeme (char ')') <* lexeme (char '{')) <*> many (lexeme line)) <* char '}'
+macroDecl = string "macro" >> space1 >> (MacroDecl <$> lexeme identifier <*> (lexeme (char '(') >> sepBy (lexeme macroArg) (lexeme $ char ',') <* lexeme (char ')') <* lexeme (char '{')) <*> many (lexeme line)) <* char '}'
 
 decl :: Parser Decl
 decl = DeclMacro <$> macroDecl
 
 code :: Parser Code
-code = Code <$> many (lexeme decl)
+code = spaceConsumer *> (Code <$> many (lexeme decl))
 
 class VarGen m where
   genVar :: m String
