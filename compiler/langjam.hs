@@ -169,7 +169,7 @@ regAllocGetInterestsPerLine :: Map.Map Int (Set.Set String) -> Map.Map Int (Set.
 regAllocGetInterestsPerLine reads writes sources targets codeLen = fst $ execState helper (Map.empty, Set.fromList [0..codeLen-1]) where
   helper = do
     q <- gets snd
-    maybe (pure ()) helper' $ Set.lookupMax q
+    maybe (pure ()) (\lineNum -> helper' lineNum >> helper) (Set.lookupMax q)
 
   helper' lineNum = do
     let getLine = \l -> gets $ Map.findWithDefault Set.empty l . fst
@@ -211,7 +211,7 @@ regAlloc instrTypes l = execStateT (mapM_ handleReg regList) Map.empty where
   lineToWrites = invertGraph $ snd <$> readWrites
   targets = computeTargets instrTypes l
   sources = invertGraph targets
-  interestsPerLine = regAllocGetInterestsPerLine lineToReads lineToWrites targets sources (length l)
+  interestsPerLine = regAllocGetInterestsPerLine lineToReads lineToWrites sources targets (length l)
   livenessPerLine = Map.unionsWith (<>) [interestsPerLine, lineToReads, lineToWrites]
   regLivenesses = invertGraph livenessPerLine
   regList = Map.keys readWrites -- TODO minor hack
@@ -342,7 +342,7 @@ main = do
   print lines
   let regs = fromJust $ regAlloc (fst <$> chip8Instrs) lines
   putStrLn "register allocation:"
-  print $ regs
+  print regs
   putStrLn "assembly:"
   print $ runAssemblerBase $ assemble regs lines
   putStrLn "machine:"
