@@ -41,32 +41,50 @@ data Code = Code [Decl] deriving (Show)
 data HardwareRegister = V0 | V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | VA | VB | VC | VD | VE | VF deriving (Eq, Ord, Enum, Bounded, Show) -- nice
 
 -- TODO I don't trust this:
+-- Treat spaces, # line comments, and /* block comments */ as whitespace
+spaceConsumer :: Parser ()
+spaceConsumer =
+  Lexer.space
+    space1
+    (Lexer.skipLineComment "#")
+    (Lexer.skipBlockComment "/*" "*/")
+
 lexeme :: Parser a -> Parser a
-lexeme = Lexer.lexeme space
+lexeme = Lexer.lexeme spaceConsumer
+
+-- Identifier: [A-Za-z_][A-Za-z0-9_]*
+identifier :: Parser String
+identifier =
+  (:) <$> (letterChar <|> char '_')
+      <*> many (alphaNumChar <|> char '_')
 
 expr :: Parser Expr
-expr = (NumLit . read <$> some digitChar) <|> (VarExpr <$> some letterChar)
+expr = (NumLit . read <$> some digitChar) <|> (VarExpr <$> identifier)
 
 instr :: Parser Instr
-instr = Instr <$> (some letterChar <* space1) <*> (sepBy (lexeme expr) (lexeme $ char ',')) <* char ';'
+instr = Instr <$> (identifier <* space1) <*> (sepBy (lexeme expr) (lexeme $ char ',')) <* char ';'
 
 line :: Parser Line
-line = (InstrLine <$> instr) <|> (LabelLine <$> (char ':' >> some letterChar <* char ':')) -- TODO labels shouldnt need intitial :
+line =
+  try labelLine <|> instrLine
+  where
+    labelLine = LabelLine <$> (identifier <* char ':')
+    instrLine = InstrLine  <$> instr
 
 argType :: Parser ArgType
 argType = (char 'r' >> pure RArg) <|> (char 'w' >> pure WArg) <|> (string "rw" >> pure RWArg) <|> (string "int" >> pure IntArg) <|> (string "label" >> pure LabelArg)
 
 macroArg :: Parser MacroArg
-macroArg = MacroArg <$> (argType <* space1) <*> some letterChar
+macroArg = MacroArg <$> (argType <* space1) <*> identifier
 
 macroDecl :: Parser MacroDecl
-macroDecl = string "macro" >> space1 >> (MacroDecl <$> lexeme (some letterChar) <*> (lexeme (char '(') >> sepBy (lexeme macroArg) (lexeme $ char ',') <* lexeme (char ')') <* lexeme (char '{')) <*> many (lexeme line)) <* char '}'
+macroDecl = string "macro" >> space1 >> (MacroDecl <$> lexeme identifier <*> (lexeme (char '(') >> sepBy (lexeme macroArg) (lexeme $ char ',') <* lexeme (char ')') <* lexeme (char '{')) <*> many (lexeme line)) <* char '}'
 
 decl :: Parser Decl
 decl = DeclMacro <$> macroDecl
 
 code :: Parser Code
-code = Code <$> many (lexeme decl)
+code = spaceConsumer *> (Code <$> many (lexeme decl))
 
 class VarGen m where
   genVar :: String -> m String
@@ -212,12 +230,34 @@ runAssemblerBase :: AssemblerBase () -> [(String, [Either HardwareRegister Int])
 runAssemblerBase = snd . runWriter . assemblerBase
 
 -- TODO endianness
-assembleLine :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> Map.Map String Int -> Instr -> m ()
-assembleLine regAllocs labels (Instr {..}) = emitInstr instrName $ processArg <$> instrArgs where
-  processArg (NumLit n) = Right n
-  processArg (VarExpr v) = case (Map.lookup v regAllocs, Map.lookup v labels) of
-    (Just reg, _) -> Left reg
-    (_, Just n) -> Right n
+assembleLine
+  :: (Assembler m, Monad m)
+  => Map.Map String HardwareRegister  -- register allocations
+  -> Map.Map String Int               -- label -> instruction index
+  -> Instr
+  -> m ()
+assembleLine regAllocs labels (Instr {..}) =
+  emitInstr instrName (map processArg instrArgs)
+  where
+    -- Where your emulator loads the program in RAM.
+    -- For wernsey/chip8-style cores this is normally 0x200.
+    programStart :: Int
+    programStart = 0x200
+
+    -- Instruction index -> byte address
+    labelToAddr :: Int -> Int
+    labelToAddr n = programStart + 2 * n
+
+    processArg :: Expr -> Either HardwareRegister Int
+    processArg (NumLit n) = Right n
+    processArg (VarExpr v) =
+      case (Map.lookup v regAllocs, Map.lookup v labels) of
+        -- Variable that was given a hardware register
+        (Just reg, _) -> Left reg
+        -- Label: convert from instruction index to RAM address
+        (_, Just n)   -> Right (labelToAddr n)
+        -- Should not happen if your macros are well-formed
+        _             -> error ("Unknown variable/label: " ++ v)
 
 assemble :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> [Line] -> m ()
 assemble regAllocs lines = let (instrs, labels) = splitLines lines in mapM_ (assembleLine regAllocs labels) instrs
