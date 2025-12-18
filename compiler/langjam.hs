@@ -69,10 +69,10 @@ code :: Parser Code
 code = Code <$> many (lexeme decl)
 
 class VarGen m where
-  genVar :: m String
+  genVar :: String -> m String
 
 instance VarGen (Rand StdGen) where
-  genVar = UUID.toString <$> getRandom
+  genVar s = ((s <> "-") <>) . UUID.toString <$> getRandom
 
 class ReplaceVars t where
   replaceVars :: (Monad m) => (String -> m Expr) -> t -> m t
@@ -108,7 +108,7 @@ inlineMacro excl args decl = (\localMap -> runIdentity . replaceVars (replaceFun
   argMap = Map.fromList $ zip argList args
   argSet = Set.fromList argList
   localSet = privateVars (excl `Set.union` argSet) decl
-  genLocalMap = Map.fromList <$> (sequence $ (\v -> (v,) . VarExpr <$> genVar) <$> Set.toList localSet)
+  genLocalMap = Map.fromList <$> (sequence $ (\v -> (v,) . VarExpr <$> genVar v) <$> Set.toList localSet)
 
 inlineAllMacros :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> (String -> m MacroDecl) -> MacroDecl -> m MacroDecl
 inlineAllMacros builtins globalExcl decls decl = (\newBody -> decl { macroBody = concat newBody }) <$> sequence (replaceLine <$> macroBody decl) where
@@ -190,7 +190,7 @@ regAlloc instrTypes l = execStateT (mapM_ handleReg regList) Map.empty where
   livenessPerLine = Map.unionsWith (<>) [interestsPerLine, lineToReads, lineToWrites]
   regLivenesses = invertGraph livenessPerLine
   regList = Map.keys readWrites -- TODO minor hack
-  allRegs = Set.fromList [minBound..maxBound]
+  allRegs = Set.fromList [V1 .. VE]
   handleReg reg = do
     currentMap <- get
     let allLines = fromMaybe Set.empty $ Map.lookup reg regLivenesses
@@ -244,9 +244,9 @@ chip8Instrs = Map.fromList
   , ("skipifeqn", (([RArg, IntArg], Just $ Set.fromList [1, 2]), MachineInstr 0x3000))
   , ("skipifneqn", (([RArg, IntArg], Just $ Set.fromList [1, 2]), MachineInstr 0x4000))
   , ("skipifeq", (([RArg, RArg], Just $ Set.fromList [1, 2]), MachineInstr 0x5000))
-  , ("setn", (([RArg, IntArg], Nothing), MachineInstr 0x6000))
+  , ("setn", (([WArg, IntArg], Nothing), MachineInstr 0x6000))
   , ("addn", (([RWArg, IntArg], Nothing), MachineInstr 0x7000))
-  , ("set", (([RArg, RArg], Nothing), MachineInstr 0x8000))
+  , ("set", (([WArg, RArg], Nothing), MachineInstr 0x8000))
   , ("bor", (([RWArg, RArg], Nothing), MachineInstr 0x8001))
   , ("band", (([RWArg, RArg], Nothing), MachineInstr 0x8002))
   , ("bxor", (([RWArg, RArg], Nothing), MachineInstr 0x8003))
@@ -294,6 +294,8 @@ main = do
   putStrLn "inlined:"
   print lines
   let regs = fromJust $ regAlloc (fst <$> chip8Instrs) lines
+  putStrLn "register allocation:"
+  print $ regs
   putStrLn "assembly:"
   print $ runAssemblerBase $ assemble regs lines
   putStrLn "machine:"
