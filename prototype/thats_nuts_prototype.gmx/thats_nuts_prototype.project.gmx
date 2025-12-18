@@ -40,6 +40,8 @@
     <script>scripts\enemy_destroy.gml</script>
     <script>scripts\random_pos_away_from_player.gml</script>
     <script>scripts\is_occupied.gml</script>
+    <script>scripts\spawn_rattlesnakes.gml</script>
+    <script>scripts\spawn_eagles.gml</script>
   </scripts>
   <objects name="objects">
     <object>objects\obj_squirrel</object>

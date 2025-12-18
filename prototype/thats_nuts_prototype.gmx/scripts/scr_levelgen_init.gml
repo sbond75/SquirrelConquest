@@ -37,6 +37,11 @@ var randomNutChance;
 var branchEnemyChance;
 var randomEnemyChance;
 var lim;
+var numEnemiesToPlace;
+numEnemiesToPlace = 16
+if numEnemiesToPlace > global.numEnemies {
+    show_error("Too many enemies requested", true)
+}
 // //
 
 for (i = 0; i < n; i += 1)
@@ -181,65 +186,8 @@ while global.nutCounter < lim {
 //    - Chance elsewhere on the map
 // -----------------------------------------------------------------------------
 
-randomEnemyChance = 0.015;  // 1.5% per non-branch tile
-
-lim = 2 * global.numEnemies div 4
-while global.enemyCounter < lim {
-    for (my = 0; my < global.mapHeight; my += 1)
-    {
-        for (mx = 0; mx < global.mapWidth; mx += 1)
-        {
-            var tileType;
-            tileType = get_tile(mx, my);
-    
-            var chance;
-            chance = 0;
-            
-            is_occupied(mx, my, true)
-            if out_isOccupied {
-                continue
-            }
-    
-            if (tileType == global.tileTAir)
-            {
-                chance = randomEnemyChance;
-            }
-            
-            // Check limit
-            if global.enemyCounter >= lim {
-                break;
-            }
-            
-            // Skip if center is inside the excluded center kernel
-            var cdx;
-            var cdy;
-            cdx = mx - centerX;
-            cdy = my - centerY;
-            if (cdx * cdx + cdy * cdy <= excludeRadiusSq)
-            {
-                continue;
-            }
-    
-            if (chance > 0 && random(1) < chance)
-            {
-                // Create enemy aligned to tile
-                var px;
-                var py;
-                px = mx * tileSize;
-                py = my * tileSize;
-    
-                var enemyInst;
-                enemyInst = instance_create(px, py, obj_rattlesnake);
-    
-                // Store in global.enemies as a growing array
-                var enemyIndex;
-                enemyIndex = global.enemyCounter;
-                global.enemies[enemyIndex] = enemyInst;
-                global.enemyCounter++;
-            }
-        }
-    }
-}
+lim = 2 * numEnemiesToPlace div 4
+spawn_rattlesnakes(lim, centerX, centerY)
 
 // -----------------------------------------------------------------------------
 // 3. Place eagles
@@ -247,68 +195,5 @@ while global.enemyCounter < lim {
 //    - Lower elsewhere on the map
 // -----------------------------------------------------------------------------
 
-// "On branches" more likely than "random around map"
-branchEnemyChance = 0.02;  // 2% per branch tile
-randomEnemyChance = 0.01;  // 1% per non-branch tile
-
-lim = 4 * global.numEnemies div 4
-while global.enemyCounter < lim {
-    for (my = 0; my < global.mapHeight; my += 1)
-    {
-        for (mx = 0; mx < global.mapWidth; mx += 1)
-        {
-            var tileType;
-            tileType = get_tile(mx, my);
-    
-            var chance;
-            chance = 0;
-            
-            is_occupied(mx, my, true)
-            if out_isOccupied {
-                continue
-            }
-    
-            if (tileType == global.tileTBranch)
-            {
-                chance = branchEnemyChance;
-            }
-            else
-            {
-                chance = randomEnemyChance;
-            }
-            
-            // Check limit
-            if global.enemyCounter >= lim {
-                break;
-            }
-            
-            // Skip if center is inside the excluded center kernel
-            var cdx;
-            var cdy;
-            cdx = mx - centerX;
-            cdy = my - centerY;
-            if (cdx * cdx + cdy * cdy <= excludeRadiusSq)
-            {
-                continue;
-            }
-    
-            if (chance > 0 && random(1) < chance)
-            {
-                // Create enemy aligned to tile
-                var px;
-                var py;
-                px = mx * tileSize;
-                py = my * tileSize;
-    
-                var enemyInst;
-                enemyInst = instance_create(px, py, obj_eagle);
-    
-                // Store in global.enemies as a growing array
-                var enemyIndex;
-                enemyIndex = global.enemyCounter;
-                global.enemies[enemyIndex] = enemyInst;
-                global.enemyCounter++;
-            }
-        }
-    }
-}
+lim = 4 * numEnemiesToPlace div 4
+spawn_eagles(lim, centerX, centerY)

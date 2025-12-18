@@ -13,10 +13,10 @@ tileSize = global.tileSize; // tile size in pixels
 
 while true {
     var tileX;
-    tileX = irandom(global.mapWidth);
+    tileX = irandom(global.mapWidth-1);
     
     var tileY;
-    tileY = irandom(global.mapHeight);
+    tileY = irandom(global.mapHeight-1);
     
     // Skip if center is inside the excluded center kernel
     var cdx;

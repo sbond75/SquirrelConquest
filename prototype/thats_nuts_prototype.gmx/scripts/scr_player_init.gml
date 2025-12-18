@@ -8,3 +8,9 @@ hp = 3
 stateFrames = 0
 eating = false
 score = 0
+
+// debug //
+if debug_mode {
+    view_enabled = false
+}
+// //

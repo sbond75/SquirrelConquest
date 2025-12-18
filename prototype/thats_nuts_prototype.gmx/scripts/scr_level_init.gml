@@ -17,7 +17,8 @@ for (i = 0; i < global.tilemapSize; i += 1)
 global.tileSize = 8
 
 // Enemies
-global.numEnemies = 16
+//global.numEnemies = 16
+global.numEnemies = 64
 global.enemyCounter = 0
 for (i = 0; i < global.numEnemies; i += 1)
 {

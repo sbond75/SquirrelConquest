@@ -155,4 +155,22 @@ for (i = 0; i < global.nutCounter; i += 1)
     }
 }
 
+// Spawn enemies on a fixed timer
+if global.frameCounter mod 200 == 0 {
+    var lim
+    lim = global.enemyCounter + 1
+    if lim < global.numEnemies {
+        var centerX
+        var centerY
+        centerX = obj_squirrel.tileX
+        centerY = obj_squirrel.tileY
+        if irandom(1) == 1 {
+            spawn_eagles(lim, centerX, centerY)
+        }
+        else {
+            spawn_rattlesnakes(lim, centerX, centerY)
+        }
+    }
+}
+
 global.frameCounter++

@@ -30,18 +30,18 @@ with (enemy)
     instance_destroy();
 }
 
-// Check victory
-var i;
-var enemy;
-enemy = noone
-for (i = 0; i < global.enemyCounter; i += 1)
-{
-    if (global.enemies[i] != noone)
-    {
-        enemy = global.enemies[i]
-        break;
-    }
-}
-if enemy == noone {
-    show_message("Victory!")
-}
+// // Check victory
+// var i;
+// var enemy;
+// enemy = noone
+// for (i = 0; i < global.enemyCounter; i += 1)
+// {
+//     if (global.enemies[i] != noone)
+//     {
+//         enemy = global.enemies[i]
+//         break;
+//     }
+// }
+// if enemy == noone {
+//     show_message("Victory!")
+// }
