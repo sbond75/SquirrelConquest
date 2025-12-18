@@ -28,7 +28,7 @@ macro writeMemConst(int memloc, int val) {
 */
 
 /* Placeholder: set I to player sprite and draw it at (px, py) */
-macro drawPlayer() {
+macro drawPlayer(r pw, r py) {
   seti 300;             # TODO: put your sprite at I = 300
   draw px, py, 5;       # TODO: 5 = sprite height in bytes
 }
@@ -51,7 +51,7 @@ macro drawPlayer() {
 
 */
 
-macro updatePlayer() {
+macro updatePlayer(rw px, rw py) {
   # step size (pixels)
   setn step, 1;
 
@@ -100,7 +100,7 @@ macro main() {
 
 loop:
   clear ;
-  drawPlayer ;
-  updatePlayer ;
+  drawPlayer px, py;
+  updatePlayer px, py;
   goto loop;
 }

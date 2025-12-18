@@ -72,7 +72,14 @@ line =
     instrLine = InstrLine  <$> instr
 
 argType :: Parser ArgType
-argType = (char 'r' >> pure RArg) <|> (char 'w' >> pure WArg) <|> (string "rw" >> pure RWArg) <|> (string "int" >> pure IntArg) <|> (string "label" >> pure LabelArg)
+argType =
+  choice
+    [ try (string "rw"   >> pure RWArg)
+    , string "int"       >> pure IntArg
+    , string "label"     >> pure LabelArg
+    , char 'r'           >> pure RArg
+    , char 'w'           >> pure WArg
+    ]
 
 macroArg :: Parser MacroArg
 macroArg = MacroArg <$> (argType <* space1) <*> identifier
