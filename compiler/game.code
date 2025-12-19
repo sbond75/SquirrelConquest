@@ -23,14 +23,21 @@ macro writeMemConst(int memloc, int val) {
 }
 
 /*
-  px, py  : player position in pixels (0..63, 0..31)
-  key     : temp register for keypad index
+  px, py   : current player position in pixels (0..63, 0..31)
+  oldx,oldy: previous player position (for erase/redraw)
+  key      : temp register for keypad index
 */
 
-/* Placeholder: set I to player sprite and draw it at (px, py) */
+/* Set I to player sprite and draw it at (px, py) */
 macro drawPlayer(r px, r py) {
-  seti 300;             # TODO: put your sprite at I = 300
-  draw px, py, 5;       # TODO: 5 = sprite height in bytes
+  seti 300;          # TODO: sprite data at I = 300
+  draw px, py, 5;    # TODO: 5 = sprite height
+}
+
+/* Erase sprite at old position using XOR draw */
+macro erasePlayer(r oldx, r oldy) {
+  seti 300;
+  draw oldx, oldy, 5;
 }
 
 /*
@@ -41,33 +48,28 @@ macro drawPlayer(r px, r py) {
     S -> chip key 8  (down)
     D -> chip key 9  (right)
 
-  skipifkey vX: skip next instruction if key[vX] is pressed.
-  We use the pattern:
+  Pattern:
 
     setn key, N;
-    skipifkey key;   # if pressed, skip goto
-    goto label;      # if not pressed, we jump over movement
+    skipifkey key;    # if pressed, skip goto
+    goto label;       # if not pressed, jump over movement
     ... movement ...
-
-*/
+  */
 
 macro updatePlayer(rw px, rw py) {
-  # step size (pixels)
-  setn step, 1;
-
   # --- LEFT (A -> key index 7) ---
   setn key, 7;
   skipifkey key;
   goto no_left;
   skipifeqn px, 0;
-  addn px, 255;         # -1 mod 256
+  addn px, 255;          # -1 mod 256
 no_left:
 
   # --- RIGHT (D -> key index 9) ---
   setn key, 9;
   skipifkey key;
   goto no_right;
-  skipifeqn px, 63;     # clamp to screen width 64
+  skipifeqn px, 63;      # clamp to screen width 64
   addn px, 1;
 no_right:
 
@@ -76,31 +78,74 @@ no_right:
   skipifkey key;
   goto no_up;
   skipifeqn py, 0;
-  addn py, 255;         # -1
+  addn py, 255;          # -1
 no_up:
 
   # --- DOWN (S -> key index 8) ---
   setn key, 8;
   skipifkey key;
   goto no_down;
-  skipifeqn py, 31;     # clamp to screen height 32
+  skipifeqn py, 31;      # clamp to screen height 32
   addn py, 1;
 no_down:
 }
 
 /*
-  Simple main loop:
-  - initialise px, py to the center-ish of the screen
-  - repeatedly clear, draw player, handle input
+  Only erase/redraw if the player actually moved.
+*/
+macro redrawIfMoved(r px, r py, r oldx, r oldy) {
+  set movedx, px;
+  skipifeq movedx, oldx;
+  goto moved;
+
+  set movedy, py;
+  skipifeq movedy, oldy;
+  goto moved;
+
+  goto nomove;
+
+moved:
+  erasePlayer oldx, oldy;
+  drawPlayer px, py;
+nomove:
+}
+
+/*
+  Simple main loop modeled after the cube example:
+  - initialise px, py and oldx, oldy
+  - draw once
+  - in the loop: store old position, update position, erase old, draw new
 */
 
+macro waitTicks(int n) {
+  # Put n (1..255) into some temp register t
+  setn t, n;
+  setdelay t;          # DT := n
+
+wait_loop:
+  getdelay t;          # t := DT
+  skipifeqn t, 0;      # skip next if t == 0
+  goto wait_loop;      # if t != 0, keep waiting
+}
+
 macro main() {
-  setn px, 32;          # mid-screen X
-  setn py, 16;          # mid-screen Y
+  setn px, 32;
+  setn py, 16;
+
+  set oldx, px;
+  set oldy, py;
+  drawPlayer px, py;
 
 loop:
-  clear ;
-  drawPlayer px, py;
+  set oldx, px;
+  set oldy, py;
+
   updatePlayer px, py;
+
+  erasePlayer oldx, oldy;
+  drawPlayer px, py;
+
+  waitTicks 1;       # one 60 Hz tick per game step
   goto loop;
 }
+
