@@ -381,7 +381,7 @@ typecheckMacro outerVars (Macro{..}) = mapM_ (typecheckMacroLine innerVars) macr
   localVars = fold $ getVars <$> macroBody --TODO
   localVarsMap = Map.fromList $ zip (Set.toList localVars) $ repeat RWArg
   argsMap = Map.fromList $ (\(MacroArg{..}) -> (macroArgName, macroArgType)) <$> macroArgs
-  innerVars = argsMap `Map.union` labelVarsMap `Map.union` localVarsMap `Map.union ` outerVars
+  innerVars = argsMap `Map.union` labelVarsMap `Map.union` outerVars `Map.union` localVarsMap
 
 typecheckMacroLine :: Map.Map String ArgType -> Line -> Either String ()
 typecheckMacroLine vars (InstrLine (Instr{..})) = do
@@ -480,8 +480,10 @@ main = do
   userCode `deepseq` pure ()
   let parsedCode = either (error . errorBundlePretty) id $ parse code "" $ T.pack userCode
   let codeMacroTypes = getCodeMacroTypes parsedCode
+  let regions = Set.fromList [declRegionName d | DeclRegion d <- codeDecls parsedCode]
+  let regionsTypes = Map.fromList $ zip (Set.toList regions) (repeat IntArg)
   putStrLn "typecheck:"
-  print $ mapM_ (typecheckMacro (Map.union chip8Types codeMacroTypes)) [d | DeclMacro _ d <- codeDecls parsedCode] -- TODO check that we don't overwrite builtins. also more generally check that stuff doesnt overwrite other stuff
+  print $ mapM_ (typecheckMacro (Map.union chip8Types $ Map.union regionsTypes codeMacroTypes)) [d | DeclMacro _ d <- codeDecls parsedCode] -- TODO check that we don't overwrite builtins. also more generally check that stuff doesnt overwrite other stuff
   g <- getStdGen
   let lines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) (Set.fromList [declRegionName d | DeclRegion d <- codeDecls parsedCode]) parsedCode) g
   putStrLn "region decls:"
