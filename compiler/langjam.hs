@@ -26,17 +26,17 @@ import qualified Data.ByteString as BS
 
 type Parser = Parsec Void T.Text
 
-data Expr = NumLit Int | VarExpr String deriving (Show)
+data Expr = NumLit Int | VarExpr String | MacroExpr Macro deriving (Show)
 data Instr = Instr { instrName :: String, instrArgs :: [Expr] } deriving (Show)
 data Line = InstrLine Instr | LabelLine String deriving (Show)
 
-data ArgType = RArg | WArg | RWArg | IntArg | LabelArg deriving (Show)
+data ArgType = RArg | WArg | RWArg | IntArg | LabelArg | MacroValArg {-TODO clunky name-} [ArgType] deriving (Show)
 data MacroArg = MacroArg { macroArgType :: ArgType, macroArgName :: String } deriving (Show)
-data MacroDecl = MacroDecl { macroName :: String, macroArgs :: [MacroArg], macroBody :: [Line] } deriving (Show)
+data Macro = Macro { macroArgs :: [MacroArg], macroCaptured :: [String], macroBody :: [Line] } deriving (Show)
 
-data Decl = DeclMacro MacroDecl deriving (Show)
+data Decl = DeclMacro { declMacroName :: String, declMacroMacro :: Macro } deriving (Show)
 
-data Code = Code [Decl] deriving (Show)
+data Code = Code { codeDecls :: [Decl] } deriving (Show)
 
 data HardwareRegister = V0 | V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | VA | VB | VC | VD | VE | VF deriving (Eq, Ord, Enum, Bounded, Show) -- nice
 
@@ -59,7 +59,7 @@ identifier =
       <*> many (alphaNumChar <|> char '_')
 
 expr :: Parser Expr
-expr = (NumLit . read <$> some digitChar) <|> (VarExpr <$> identifier)
+expr = (NumLit . read <$> lexeme (some digitChar)) <|> (VarExpr <$> lexeme identifier) <|> macroExpr <|> macroExprWithArgs
 
 instr :: Parser Instr
 instr = Instr <$> (identifier <* space1) <*> (sepBy (lexeme expr) (lexeme $ char ',')) <* char ';'
@@ -79,19 +79,34 @@ argType =
     , string "label"     >> pure LabelArg
     , char 'r'           >> pure RArg
     , char 'w'           >> pure WArg
+    , lexeme (string "macro") >> MacroValArg <$> argTypes
     ]
 
 macroArg :: Parser MacroArg
-macroArg = MacroArg <$> (argType <* space1) <*> identifier
+macroArg = MacroArg <$> lexeme (argType <* space1) <*> lexeme identifier
 
-macroDecl :: Parser MacroDecl
-macroDecl = string "macro" >> space1 >> (MacroDecl <$> lexeme identifier <*> (lexeme (char '(') >> sepBy (lexeme macroArg) (lexeme $ char ',') <* lexeme (char ')') <* lexeme (char '{')) <*> many (lexeme line)) <* char '}'
+argTypes :: Parser [ArgType]
+argTypes = lexeme (char '(') >> sepBy (lexeme argType) (lexeme $ char ',') <* lexeme (char ')')
+
+-- TODO clunky naming, should be macroArgs but that's taken
+args :: Parser [MacroArg]
+args = lexeme (char '(') >> sepBy (lexeme macroArg) (lexeme $ char ',') <* lexeme (char ')')
+
+-- TODO clunky naming, should be macroBody btu thats taken
+macroLines :: Parser [Line]
+macroLines = lexeme (char '{') >> many (lexeme line) <* lexeme (char '}')
 
 decl :: Parser Decl
-decl = DeclMacro <$> macroDecl
+decl = fixupMacroDeclCaptureVars <$> (lexeme (string "macro" >> space1) >> ((\a b c -> DeclMacro a (Macro b [] c)) <$> lexeme identifier <*> args <*> macroLines))
+
+macroExpr :: Parser Expr
+macroExpr = MacroExpr . Macro [] [] <$> macroLines
+
+macroExprWithArgs :: Parser Expr
+macroExprWithArgs = (\a b -> MacroExpr $ Macro a [] b) <$> args <*> macroLines
 
 code :: Parser Code
-code = spaceConsumer *> (Code <$> many (lexeme decl))
+code = spaceConsumer *> (Code <$> many decl)
 
 class VarGen m where
   genVar :: String -> m String
@@ -107,6 +122,7 @@ getVars t = execState (replaceVars (\v -> modify (Set.insert v) >> pure (VarExpr
 
 instance ReplaceVars Expr where
   replaceVars f (VarExpr v) = f v
+  replaceVars f (MacroExpr m) = MacroExpr <$> replaceVars f m
   replaceVars _ e = pure e
 
 instance ReplaceVars Instr where
@@ -117,14 +133,45 @@ instance ReplaceVars Line where
     g (VarExpr v) = LabelLine v
   replaceVars f (InstrLine i) = InstrLine <$> replaceVars f i
 
-instance ReplaceVars MacroDecl where
-  replaceVars f d = (\b -> d { macroBody = b }) <$> mapM (replaceVars f) (macroBody d)
+instance ReplaceVars Macro where
+  replaceVars f m = (\b -> m { macroBody = b }) <$> mapM (replaceVars f') (macroBody m) where
+    f' s
+      | s `Set.member` toIgnore = pure (VarExpr s)
+      | otherwise = f s
+    toIgnore = Set.union (Set.fromList $ macroArgName <$> macroArgs m) (Set.fromList $ macroCaptured m)
 
-privateVars :: Set.Set String -> MacroDecl -> Set.Set String
-privateVars excl decl = Set.difference (getVars decl) (Set.union excl $ Set.fromList $ macroArgName <$> macroArgs decl)
+getVarsExceptFromMacrosExpr :: Expr -> Set.Set String
+getVarsExceptFromMacrosExpr (MacroExpr _) = Set.empty
+getVarsExceptFromMacrosExpr e = getVars e
 
-inlineMacro :: (VarGen m, Monad m) => Set.Set String -> [Expr] -> MacroDecl -> m [Line]
-inlineMacro excl args decl = (\localMap -> runIdentity . replaceVars (replaceFunc localMap) <$> macroBody decl) <$> genLocalMap where
+getVarsExceptFromMacrosLine :: Line -> Set.Set String
+getVarsExceptFromMacrosLine (InstrLine (Instr{..})) = fold $ getVarsExceptFromMacrosExpr <$> instrArgs
+getVarsExceptFromMacrosLine _ = Set.empty
+
+fixupExprCaptureVars :: Set.Set String -> Expr -> Expr
+fixupExprCaptureVars vars (MacroExpr m) = MacroExpr $ fixupMacroCaptureVars vars m
+fixupExprCaptureVars _ e = e
+
+fixupLineCaptureVars :: Set.Set String -> Line -> Line
+fixupLineCaptureVars vars (InstrLine i@(Instr{..})) = InstrLine $ i { instrArgs = fixupExprCaptureVars vars <$> instrArgs }
+fixupLineCaptureVars _ l = l
+
+fixupMacroCaptureVars :: Set.Set String -> Macro -> Macro
+fixupMacroCaptureVars varsToCapture m@(Macro{..}) = m { macroCaptured = Set.toList macroCaptured', macroBody = fixupLineCaptureVars varsToCapture' <$> macroBody } where
+  macroCaptured' = (varsToCapture `Set.intersection` getVars m) `Set.difference` argVars
+  varsToCapture' = varsToCapture `Set.union` argVars `Set.union` lineVars
+  lineVars = fold $ getVarsExceptFromMacrosLine <$> macroBody
+  argVars = Set.fromList $ macroArgName <$> macroArgs
+
+fixupMacroDeclCaptureVars :: Decl -> Decl
+fixupMacroDeclCaptureVars d@(DeclMacro {..}) = d { declMacroMacro = fixupMacroCaptureVars Set.empty declMacroMacro }
+
+privateVars :: Set.Set String -> Macro -> Set.Set String
+-- TODO rename decl to macro
+privateVars excl decl = Set.difference (getVars decl) (Set.union excl $ Set.union (Set.fromList $ macroCaptured decl) $ Set.fromList $ macroArgName <$> macroArgs decl)
+
+inlineMacroExceptMacroArgs :: (VarGen m, Monad m) => Set.Set String -> [Expr] -> Macro -> m [Line]
+inlineMacroExceptMacroArgs excl args decl = (\localMap -> runIdentity . replaceVars (replaceFunc localMap) <$> macroBody decl) <$> genLocalMap where
   replaceFunc localMap v = case (Map.lookup v argMap, Map.lookup v localMap) of
     (Just argVar, _) -> pure argVar
     (_, Just localVar) -> pure localVar
@@ -135,21 +182,31 @@ inlineMacro excl args decl = (\localMap -> runIdentity . replaceVars (replaceFun
   localSet = privateVars (excl `Set.union` argSet) decl
   genLocalMap = Map.fromList <$> (sequence $ (\v -> (v,) . VarExpr <$> genVar v) <$> Set.toList localSet)
 
-inlineAllMacros :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> (String -> m MacroDecl) -> MacroDecl -> m MacroDecl
-inlineAllMacros builtins globalExcl decls decl = (\newBody -> decl { macroBody = concat newBody }) <$> sequence (replaceLine <$> macroBody decl) where
-  replaceLine (InstrLine instr) | not (instrName instr `Set.member` builtins) = decls (instrName instr) >>= inlineMacro globalExcl (instrArgs instr)
-  replaceLine line = pure [line]
+replaceLine :: (Monad m) => (String -> [Expr] -> m [Line]) -> Line -> m [Line]
+replaceLine env (InstrLine (Instr {..})) = env instrName instrArgs
+replaceLine _ line = pure [line]
 
-fullyInlineCodeMacro :: (VarGen m, Monad m) => Set.Set String -> Code -> String -> m MacroDecl
-fullyInlineCodeMacro builtins (Code declList) = f where
-  f = inlineAllMacros builtins globalExcl f . lookupDeclMap
-  lookupDeclMap m = fromJust $ Map.lookup m declMap
-  macroDeclList = (\(DeclMacro d) -> d) <$> declList
-  declMap = Map.fromList $ (\d -> (macroName d, d)) <$> macroDeclList
-  globalExcl = Set.empty
+replaceLines :: (Monad m) => (String -> [Expr] -> m [Line]) -> [Line] -> m [Line]
+replaceLines env lines = concat <$> mapM (replaceLine env) lines
 
-codeToLines :: (VarGen m, Monad m) => Set.Set String -> Code -> m [Line]
-codeToLines builtins code = macroBody <$> fullyInlineCodeMacro builtins code "main"
+inlineMacro :: (VarGen m, Monad m) => Set.Set String -> (String -> [Expr] -> m [Line]) -> [Expr] -> Macro -> m [Line]
+inlineMacro excl env args macro = inlineMacroExceptMacroArgs excl args macro >>= replaceLines env' where
+  env' s a = maybe (env s a) (\(MacroExpr m) -> inlineMacro excl env a m) $ Map.lookup s macroArgMap
+  macroArgMap = Map.fromList $ map (first macroArgName) $ filter (isMacroArg . macroArgType . fst) $ zip (macroArgs macro) args
+  isMacroArg (MacroValArg _) = True
+  isMacroArg _ = False
+
+inlineMacroFromCodeMap :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Map.Map String Macro -> String -> [Expr] -> m [Line]
+inlineMacroFromCodeMap builtins excl decls = f where
+  f s a | s `Set.member` builtins = pure [InstrLine (Instr s a)]
+  f s a = inlineMacro excl f a (decls Map.! s)
+
+inlineMacroFromCode :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Code -> String -> [Expr] -> m [Line]
+inlineMacroFromCode builtins excl code = inlineMacroFromCodeMap builtins excl decls where
+  decls = Map.fromList $ (\DeclMacro{..} -> (declMacroName, declMacroMacro)) <$> codeDecls code
+
+codeToLines :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Code -> m [Line]
+codeToLines builtins excl code = inlineMacroFromCode builtins excl code "main" []
 
 regAllocGatherReadWrites :: Map.Map String [ArgType] -> [Line] -> Map.Map String (Set.Set Int, Set.Set Int)
 regAllocGatherReadWrites instrTypes l = snd $ execState (mapM_ helper l) (0, Map.empty) where
@@ -337,7 +394,7 @@ main = do
   userCode `deepseq` pure ()
   let parsedCode = either (error . errorBundlePretty) id $ parse code "" $ T.pack userCode
   g <- getStdGen
-  let lines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) parsedCode) g
+  let lines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) Set.empty parsedCode) g
   putStrLn "inlined:"
   print lines
   let regs = fromJust $ regAlloc (fst <$> chip8Instrs) lines
