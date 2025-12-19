@@ -30,7 +30,7 @@ data Expr = NumLit Int | VarExpr String | MacroExpr Macro deriving (Show)
 data Instr = Instr { instrName :: String, instrArgs :: [Expr] } deriving (Show)
 data Line = InstrLine Instr | LabelLine String deriving (Show)
 
-data ArgType = RArg | WArg | RWArg | IntArg | LabelArg | MacroValArg {-TODO clunky name-} [ArgType] deriving (Show)
+data ArgType = RArg | WArg | RWArg | IntArg | LabelArg | MacroValArg {-TODO clunky name-} [ArgType] deriving (Show, Eq)
 data MacroArg = MacroArg { macroArgType :: ArgType, macroArgName :: String } deriving (Show)
 
 data Macro = Macro { macroArgs :: [MacroArg], macroCaptured :: [String], macroBody :: [Line] } deriving (Show)
@@ -364,6 +364,40 @@ assembleLine regAllocs labels (Instr {..}) =
 assemble :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> [Line] -> m ()
 assemble regAllocs lines = let (instrs, labels) = splitLines lines in mapM_ (assembleLine regAllocs labels) instrs
 
+typecheckMacro :: Map.Map String ArgType -> Macro -> Either String ()
+typecheckMacro outerVars (Macro{..}) = mapM_ (typecheckMacroLine innerVars) macroBody where
+  labelVars = Set.fromList $ catMaybes $ gatherLabelVar <$> macroBody
+  gatherLabelVar (LabelLine l) = Just l
+  gatherLabelVar _ = Nothing
+  labelVarsMap = Map.fromList $ zip (Set.toList labelVars) $ repeat LabelArg
+  localVars = fold $ getVars <$> macroBody --TODO
+  localVarsMap = Map.fromList $ zip (Set.toList localVars) $ repeat RWArg
+  argsMap = Map.fromList $ (\(MacroArg{..}) -> (macroArgName, macroArgType)) <$> macroArgs
+  innerVars = argsMap `Map.union` labelVarsMap `Map.union` localVarsMap `Map.union ` outerVars
+
+typecheckMacroLine :: Map.Map String ArgType -> Line -> Either String ()
+typecheckMacroLine vars (InstrLine (Instr{..})) = do
+  argTypes <- getArgTypes
+  when (length argTypes /= length instrArgs) $ Left $ "Mismatched arg count for call to " <> instrName
+  mapM_ (uncurry checkArg) $ zip instrArgs argTypes
+  where
+    getArgTypes = case (Map.lookup instrName vars) of
+      Just (MacroValArg argTypes) -> Right argTypes
+      _ -> Left $ "Undefined macro " <> instrName
+    checkArg (VarExpr v) t = case (Map.lookup v vars) of
+      Nothing -> Left $ "Undefined variable " <> v
+      Just vt -> when (not $ subtype vt t) $ Left $ "Type mismatch of " <> show v <> ": have " <> show vt <> ", want " <> show t
+    checkArg (NumLit _) IntArg = pure ()
+    checkArg (MacroExpr m) t@(MacroValArg ts) = when (not $ subtype (MacroValArg (macroArgType <$> macroArgs m)) t) (Left $ "Mismatched macro args: have " <> show (macroArgType <$> macroArgs m) <> ", want " <> show ts) >> typecheckMacro vars m
+    checkArg x t = Left $ "Mismatched argument " <> show x <> ": wanted type " <> show t
+typecheckMacroLine _ _ = pure ()
+
+subtype :: ArgType -> ArgType -> Bool
+subtype RWArg RArg = True
+subtype RWArg WArg = True
+subtype (MacroValArg a) (MacroValArg b) = length a == length b && all (uncurry subtype) (zip b a) -- order switch is intentional
+subtype x y = x == y
+
 data MachineInstr = MachineInstr { baseBytes :: Word16 } | FakeInstr ([Either HardwareRegister Int] -> Word16)
 
 renderMachineInstr :: MachineInstr -> [Either HardwareRegister Int] -> Word16
@@ -419,11 +453,17 @@ chip8Instrs = Map.fromList
   , ("setzero", (([RArg], Nothing), FakeInstr (\[Left reg] -> renderMachineInstr (snd $ chip8Instrs Map.! "set") [Left V0, Left reg])))
   ]
 
+chip8Types :: Map.Map String ArgType
+chip8Types = (MacroValArg . fst . fst) <$> chip8Instrs
+
 w16to8 :: Word16 -> (Word8, Word8)
 w16to8 w = (fromIntegral $ shiftR w 8, fromIntegral w)
 
 w16to8s :: [Word16] -> [Word8]
 w16to8s = concatMap ((\(a,b) -> [a,b]) . w16to8)
+
+getCodeMacroTypes :: Code -> Map.Map String ArgType
+getCodeMacroTypes c = Map.fromList [(declMacroName, MacroValArg $ fmap macroArgType $ macroArgs $ declMacroMacro) | DeclMacro {..} <- codeDecls c]
 
 main :: IO ()
 main = do
@@ -431,6 +471,9 @@ main = do
   userCode <- getContents
   userCode `deepseq` pure ()
   let parsedCode = either (error . errorBundlePretty) id $ parse code "" $ T.pack userCode
+  let codeMacroTypes = getCodeMacroTypes parsedCode
+  putStrLn "typecheck:"
+  print $ mapM_ (typecheckMacro (Map.union chip8Types codeMacroTypes)) [d | DeclMacro _ d <- codeDecls parsedCode] -- TODO check that we don't overwrite builtins. also more generally check that stuff doesnt overwrite other stuff
   g <- getStdGen
   let lines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) Set.empty parsedCode) g
   putStrLn "inlined:"
