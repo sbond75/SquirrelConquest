@@ -38,8 +38,10 @@ data MacroArg = MacroArg { macroArgType :: ArgType, macroArgName :: String } der
 data Macro = Macro { macroArgs :: [MacroArg], macroCaptured :: [String], macroBody :: [Line] } deriving (Show)
 data Region = Region { regionSize :: Word16 } deriving (Show)
 data RegionDecl = RegionDecl { declRegionName :: String, declRegionRegion :: Region } deriving (Show)
+data Const = Const { constValue :: Int } deriving (Show)
+data ConstDecl = ConstDecl { declConstName :: String, declConstConst :: Const } deriving (Show)
 
-data Decl = DeclMacro { declMacroName :: String, declMacroMacro :: Macro } | DeclRegion RegionDecl deriving (Show)
+data Decl = DeclMacro { declMacroName :: String, declMacroMacro :: Macro } | DeclRegion RegionDecl | DeclConst ConstDecl deriving (Show)
 
 data Code = Code { codeDecls :: [Decl] } deriving (Show)
 
@@ -105,15 +107,22 @@ macroLines = lexeme (char '{') >> many (lexeme line) <* lexeme (char '}')
 word16 :: Parser Word16
 word16 = read <$> some digitChar
 
+intParser :: Parser Int
+intParser = read <$> some digitChar
+
 regionDecl :: Parser RegionDecl
 regionDecl = string "region" >> space1 >> (RegionDecl <$> lexeme identifier <*> (Region <$> lexeme word16))
 
+constDecl :: Parser ConstDecl
+constDecl = string "const" >> space1 >> (ConstDecl <$> lexeme identifier <*> (Const <$> lexeme intParser))
+
 decl :: Parser Decl
 decl =
-  try macro <|> region
+  try macro <|> region <|> const
   where
     macro = fixupMacroDeclCaptureVars <$> (lexeme (string "macro" >> space1) >> ((\a b c -> DeclMacro a (Macro b [] c)) <$> lexeme identifier <*> args <*> macroLines))
     region = DeclRegion <$> regionDecl
+    const = DeclConst <$> constDecl
 
 macroExpr :: Parser Expr
 macroExpr = MacroExpr . Macro [] [] <$> macroLines
@@ -227,22 +236,17 @@ inlineMacro excl env args macro = inlineMacroExceptMacroArgs excl args macro >>=
   isMacroArg (MacroValArg _) = True
   isMacroArg _ = False
 
-inlineMacroFromCodeMap :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Map.Map String Macro -> Map.Map String Region -> String -> [Expr] -> m [Line]
-inlineMacroFromCodeMap builtins excl macroDecls regionDecls = f where
+inlineMacroFromCodeMap :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Map.Map String Macro -> String -> [Expr] -> m [Line]
+inlineMacroFromCodeMap builtins excl macroDecls = f where
   f s a | s `Set.member` builtins = pure [InstrLine (Instr s a)]
   f s a = inlineMacro excl f a (macroDecls Map.! s) >>= replaceLines f -- TODO is that `>>= replaceLines f` even necessary?
 
 inlineMacroFromCode :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Code -> String -> [Expr] -> m [Line]
-inlineMacroFromCode builtins excl code = inlineMacroFromCodeMap builtins excl macroDecls regionDecls where
+inlineMacroFromCode builtins excl code = inlineMacroFromCodeMap builtins excl macroDecls where
   macroDecls = Map.fromList $ macroDeclList
     where
       macroDeclList = concatMap grabDecl (codeDecls code)
       grabDecl (DeclMacro{..}) = [(declMacroName, declMacroMacro)]
-      grabDecl _ = []
-  regionDecls = Map.fromList $ regionDeclList
-    where
-      regionDeclList = concatMap grabDecl (codeDecls code)
-      grabDecl (DeclRegion RegionDecl{..}) = [(declRegionName, declRegionRegion)]
       grabDecl _ = []
 
 codeToLines :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Code -> m [Line]
@@ -352,26 +356,29 @@ assembleLine
   -> Map.Map String Int               -- label -> instruction index
   -> (Int -> Int)                     -- label -> address
   -> Map.Map String Int               -- region name -> region addr
+  -> Map.Map String Const             -- constant name -> constant value
   -> Instr
   -> m ()
-assembleLine regAllocs labels labelToAddr regionAddr (Instr {..}) =
+assembleLine regAllocs labels labelToAddr regionAddr consts (Instr {..}) =
   emitInstr instrName (map processArg instrArgs)
   where
     processArg :: Expr -> Either HardwareRegister Int
     processArg (NumLit n) = Right n
     processArg (VarExpr v) =
-      case (Map.lookup v regAllocs, Map.lookup v labels, Map.lookup v regionAddr) of
+      case (Map.lookup v regAllocs, Map.lookup v labels, Map.lookup v regionAddr, Map.lookup v consts) of
         -- Variable that was given a hardware register
-        (Just reg, _, _) -> Left reg
+        (Just reg, _, _, _) -> Left reg
         -- Label: convert from instruction index to RAM address
-        (_, Just n, _)   -> Right (labelToAddr n)
+        (_, Just n, _, _)   -> Right (labelToAddr n)
         -- Region: find an assigned address
-        (_, _, Just r)   -> Right (regionAddr Map.! v)
+        (_, _, Just r, _)   -> Right (regionAddr Map.! v)
+        -- Const: find a constant value
+        (_, _, _, Just c)   -> Right (constValue $ consts Map.! v)
         -- Should not happen if your macros are well-formed
         _             -> error ("Unknown variable/label: " ++ v)
 
-assemble :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> [Line] -> (Int -> Int) -> Map.Map String Int -> m ()
-assemble regAllocs lines labelToAddr regionAddr = let (instrs, labels) = splitLines lines in mapM_ (assembleLine regAllocs labels labelToAddr regionAddr) instrs
+assemble :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> [Line] -> (Int -> Int) -> Map.Map String Int -> Map.Map String Const -> m ()
+assemble regAllocs lines labelToAddr regionAddr consts = let (instrs, labels) = splitLines lines in mapM_ (assembleLine regAllocs labels labelToAddr regionAddr consts) instrs
 
 typecheckMacro :: Map.Map String ArgType -> Macro -> Either String ()
 typecheckMacro outerVars (Macro{..}) = mapM_ (typecheckMacroLine innerVars) macroBody where
@@ -483,12 +490,15 @@ main = do
   let codeMacroTypes = getCodeMacroTypes parsedCode
   let regions = Set.fromList [declRegionName d | DeclRegion d <- codeDecls parsedCode]
   let regionsTypes = Map.fromList $ zip (Set.toList regions) (repeat IntArg)
+  let consts = Set.fromList [declConstName d | DeclConst d <- codeDecls parsedCode]
   putStrLn "typecheck:"
   print $ mapM_ (typecheckMacro (Map.union chip8Types $ Map.union regionsTypes codeMacroTypes)) [d | DeclMacro _ d <- codeDecls parsedCode] -- TODO check that we don't overwrite builtins. also more generally check that stuff doesnt overwrite other stuff
   g <- getStdGen
-  let lines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) (Set.fromList [declRegionName d | DeclRegion d <- codeDecls parsedCode]) parsedCode) g
+  let lines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) (Set.fromList ([declRegionName d | DeclRegion d <- codeDecls parsedCode] ++ [ declConstName  c | DeclConst  c <- codeDecls parsedCode ])) parsedCode) g
   putStrLn "region decls:"
   print $ [d | DeclRegion d <- codeDecls parsedCode]
+  putStrLn "const decls:"
+  print $ [d | DeclConst d <- codeDecls parsedCode]
   putStrLn "inlined:"
   print lines
   let regs = fromJust $ regAlloc (fst <$> chip8Instrs) lines
@@ -498,6 +508,7 @@ main = do
   let linesLen = length [x | InstrLine x <- lines]
   let instrCount = linesLen
   let regionMap = Map.fromList [(declRegionName d, declRegionRegion d) | DeclRegion d <- codeDecls parsedCode]
+  let constMap = Map.fromList [(declConstName d, declConstConst d) | DeclConst d <- codeDecls parsedCode]
   
   -- Where your emulator loads the program in RAM.
   -- For wernsey/chip8-style cores this is normally 0x200.
@@ -510,7 +521,7 @@ main = do
           -- Region name -> byte address
           regionAddr_ :: Map.Map String Int
           regionAddr_ = assignRegions firstDataAddr regionMap
-  let assembly = assemble regs lines labelToAddr regionAddr
+  let assembly = assemble regs lines labelToAddr regionAddr constMap
         where
           -- Instruction index -> byte address
           labelToAddr :: Int -> Int
