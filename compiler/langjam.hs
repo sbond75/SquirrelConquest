@@ -34,7 +34,8 @@ data ArgType = RArg | WArg | RWArg | IntArg | LabelArg | MacroValArg {-TODO clun
 data MacroArg = MacroArg { macroArgType :: ArgType, macroArgName :: String } deriving (Show)
 
 data Macro = Macro { macroArgs :: [MacroArg], macroCaptured :: [String], macroBody :: [Line] } deriving (Show)
-data RegionDecl = RegionDecl { regionName :: String, regionSize :: Word16 } deriving (Show)
+data Region = Region { regionSize :: Word16 } deriving (Show)
+data RegionDecl = RegionDecl { declRegionName :: String, declRegionRegion :: Region } deriving (Show)
 
 data Decl = DeclMacro { declMacroName :: String, declMacroMacro :: Macro } | DeclRegion RegionDecl deriving (Show)
 
@@ -103,7 +104,7 @@ word16 :: Parser Word16
 word16 = read <$> some digitChar
 
 regionDecl :: Parser RegionDecl
-regionDecl = string "region" >> space1 >> (RegionDecl <$> lexeme identifier <*> lexeme word16)
+regionDecl = string "region" >> space1 >> (RegionDecl <$> lexeme identifier <*> (Region <$> lexeme word16))
 
 decl :: Parser Decl
 decl =
@@ -224,14 +225,23 @@ inlineMacro excl env args macro = inlineMacroExceptMacroArgs excl args macro >>=
   isMacroArg (MacroValArg _) = True
   isMacroArg _ = False
 
-inlineMacroFromCodeMap :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Map.Map String Macro -> String -> [Expr] -> m [Line]
-inlineMacroFromCodeMap builtins excl decls = f where
+inlineMacroFromCodeMap :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Map.Map String Macro -> Map.Map String Region -> String -> [Expr] -> m [Line]
+inlineMacroFromCodeMap builtins excl macroDecls regionDecls = f where
   f s a | s `Set.member` builtins = pure [InstrLine (Instr s a)]
-  f s a = inlineMacro excl f a (decls Map.! s) >>= replaceLines f -- TODO is that `>>= replaceLines f` even necessary?
+  f s a = inlineMacro excl f a (macroDecls Map.! s) >>= replaceLines f -- TODO is that `>>= replaceLines f` even necessary?
 
 inlineMacroFromCode :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Code -> String -> [Expr] -> m [Line]
-inlineMacroFromCode builtins excl code = inlineMacroFromCodeMap builtins excl decls where
-  decls = Map.fromList $ (\DeclMacro{..} -> (declMacroName, declMacroMacro)) <$> codeDecls code
+inlineMacroFromCode builtins excl code = inlineMacroFromCodeMap builtins excl macroDecls regionDecls where
+  macroDecls = Map.fromList $ macroDeclList
+    where
+      macroDeclList = concatMap grabDecl (codeDecls code)
+      grabDecl (DeclMacro{..}) = [(declMacroName, declMacroMacro)]
+      grabDecl _ = []
+  regionDecls = Map.fromList $ regionDeclList
+    where
+      regionDeclList = concatMap grabDecl (codeDecls code)
+      grabDecl (DeclRegion RegionDecl{..}) = [(declRegionName, declRegionRegion)]
+      grabDecl _ = []
 
 codeToLines :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Code -> m [Line]
 codeToLines builtins excl code = inlineMacroFromCode builtins excl code "main" []
