@@ -62,13 +62,14 @@ expr :: Parser Expr
 expr = (NumLit . read <$> lexeme (some digitChar)) <|> (VarExpr <$> lexeme identifier) <|> macroExpr <|> macroExprWithArgs
 
 instr :: Parser Instr
-instr = Instr <$> (identifier <* space1) <*> (sepBy (lexeme expr) (lexeme $ char ',')) <* char ';'
+instr = Instr <$> lexeme (identifier <* space1) <*> (sepBy (lexeme expr) (lexeme $ char ',')) <* char ';'
 
 line :: Parser Line
 line =
-  try labelLine <|> instrLine
+  try labelLine <|> try instrLine0 <|> instrLine
   where
     labelLine = LabelLine <$> (identifier <* char ':')
+    instrLine0 = InstrLine . flip Instr [] <$> (lexeme identifier <* char ';')
     instrLine = InstrLine  <$> instr
 
 argType :: Parser ArgType
@@ -86,7 +87,7 @@ macroArg :: Parser MacroArg
 macroArg = MacroArg <$> lexeme (argType <* space1) <*> lexeme identifier
 
 argTypes :: Parser [ArgType]
-argTypes = lexeme (char '(') >> sepBy (lexeme argType) (lexeme $ char ',') <* lexeme (char ')')
+argTypes = lexeme (char '(') >> sepBy (lexeme argType) (lexeme $ char ',') <* char ')'
 
 -- TODO clunky naming, should be macroArgs but that's taken
 args :: Parser [MacroArg]
@@ -116,6 +117,7 @@ instance VarGen (Rand StdGen) where
 
 class ReplaceVars t where
   replaceVars :: (Monad m) => (String -> m Expr) -> t -> m t
+  replaceVars2 :: (Monad m) => (String -> m Expr) -> t -> m t -- TODO pain...
 
 getVars :: (ReplaceVars t) => t -> Set.Set String
 getVars t = execState (replaceVars (\v -> modify (Set.insert v) >> pure (VarExpr v)) t) Set.empty
@@ -124,14 +126,21 @@ instance ReplaceVars Expr where
   replaceVars f (VarExpr v) = f v
   replaceVars f (MacroExpr m) = MacroExpr <$> replaceVars f m
   replaceVars _ e = pure e
+  replaceVars2 f (VarExpr v) = f v
+  replaceVars2 f (MacroExpr m) = MacroExpr <$> replaceVars2 f m
+  replaceVars2 _ e = pure e
 
 instance ReplaceVars Instr where
   replaceVars f i = (\l -> i { instrArgs = l }) <$> mapM (replaceVars f) (instrArgs i)
+  replaceVars2 f i = (\l -> i { instrArgs = l }) <$> mapM (replaceVars2 f) (instrArgs i)
 
 instance ReplaceVars Line where
   replaceVars f (LabelLine l) = g <$> f l where -- TODO hack
     g (VarExpr v) = LabelLine v
   replaceVars f (InstrLine i) = InstrLine <$> replaceVars f i
+  replaceVars2 f (LabelLine l) = g <$> f l where -- TODO hack
+    g (VarExpr v) = LabelLine v
+  replaceVars2 f (InstrLine i) = InstrLine <$> replaceVars2 f i
 
 instance ReplaceVars Macro where
   replaceVars f m = (\b -> m { macroBody = b }) <$> mapM (replaceVars f') (macroBody m) where
@@ -139,6 +148,12 @@ instance ReplaceVars Macro where
       | s `Set.member` toIgnore = pure (VarExpr s)
       | otherwise = f s
     toIgnore = Set.union (Set.fromList $ macroArgName <$> macroArgs m) (Set.fromList $ macroCaptured m)
+  replaceVars2 f m = (\b c -> m { macroBody = b, macroCaptured = c }) <$> mapM (replaceVars2 f') (macroBody m) <*> mapM (fmap g . f') (macroCaptured m) where
+    f' s
+      | s `Set.member` toIgnore = pure (VarExpr s)
+      | otherwise = f s
+    g (VarExpr v) = v
+    toIgnore = Set.fromList $ macroArgName <$> macroArgs m
 
 getVarsExceptFromMacrosExpr :: Expr -> Set.Set String
 getVarsExceptFromMacrosExpr (MacroExpr _) = Set.empty
@@ -171,7 +186,7 @@ privateVars :: Set.Set String -> Macro -> Set.Set String
 privateVars excl decl = Set.difference (getVars decl) (Set.union excl $ Set.union (Set.fromList $ macroCaptured decl) $ Set.fromList $ macroArgName <$> macroArgs decl)
 
 inlineMacroExceptMacroArgs :: (VarGen m, Monad m) => Set.Set String -> [Expr] -> Macro -> m [Line]
-inlineMacroExceptMacroArgs excl args decl = (\localMap -> runIdentity . replaceVars (replaceFunc localMap) <$> macroBody decl) <$> genLocalMap where
+inlineMacroExceptMacroArgs excl args decl = (\localMap -> runIdentity . replaceVars2 (replaceFunc localMap) <$> macroBody decl) <$> genLocalMap where
   replaceFunc localMap v = case (Map.lookup v argMap, Map.lookup v localMap) of
     (Just argVar, _) -> pure argVar
     (_, Just localVar) -> pure localVar
@@ -199,7 +214,7 @@ inlineMacro excl env args macro = inlineMacroExceptMacroArgs excl args macro >>=
 inlineMacroFromCodeMap :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Map.Map String Macro -> String -> [Expr] -> m [Line]
 inlineMacroFromCodeMap builtins excl decls = f where
   f s a | s `Set.member` builtins = pure [InstrLine (Instr s a)]
-  f s a = inlineMacro excl f a (decls Map.! s)
+  f s a = inlineMacro excl f a (decls Map.! s) >>= replaceLines f -- TODO is that `>>= replaceLines f` even necessary?
 
 inlineMacroFromCode :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Code -> String -> [Expr] -> m [Line]
 inlineMacroFromCode builtins excl code = inlineMacroFromCodeMap builtins excl decls where

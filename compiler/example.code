@@ -6,12 +6,12 @@ macro setir(r memLoc) {
 macro writeMem(r memLoc, r val) {
   setir memLoc;
   setzero val;
-  regdump ;
+  regdump;
 }
 
 macro readMem(r memLoc, w val) {
   setir memLoc;
-  regload ;
+  regload;
   getzero val;
 }
 
@@ -19,18 +19,40 @@ macro writeMemConst(int memLoc, int val) {
   seti memLoc;
   setn v, val;
   setzero v;
-  regdump ;
+  regdump;
 }
 
 macro initMem() {
   writeMemConst 1000, 7;
 }
 
+macro ifNZ(r cond, macro() ifCase, macro() elseCase) {
+  skipifneqn cond, 0;
+  goto a;
+  ifCase;
+  goto done;
+  a:
+  elseCase;
+  done:
+}
+
+macro fooo(macro(rw) q, macro(rw, rw) s) {
+  set x, 1;
+  set y, 2;
+  set z, 3;
+  q x;
+  s y, z;
+}
+
 macro main() {
-  initMem ;
+  setn x, 20;
+  setn y, 20;
+  ifNZ x, { setn x, 50; setn x, 70; }, { setn y, 20; setn y, 50; };
+  initMem;
   setn x, 10;
   setn y, 20;
   draw x, y, 10;
-  :lbl:
+  lbl:
   goto lbl;
+  fooo (rw a) { add x, a; }, (rw b, rw c) { add x, b; add x, c; };
 }
