@@ -148,11 +148,12 @@ instance ReplaceVars Macro where
       | s `Set.member` toIgnore = pure (VarExpr s)
       | otherwise = f s
     toIgnore = Set.union (Set.fromList $ macroArgName <$> macroArgs m) (Set.fromList $ macroCaptured m)
-  replaceVars2 f m = (\b c -> m { macroBody = b, macroCaptured = c }) <$> mapM (replaceVars2 f') (macroBody m) <*> mapM (fmap g . f') (macroCaptured m) where
+  replaceVars2 f m = (\b c -> m { macroBody = b, macroCaptured = Set.toList $ fold c }) <$> mapM (replaceVars2 f') (macroBody m) <*> mapM (fmap g . f') (macroCaptured m) where
     f' s
       | s `Set.member` toIgnore = pure (VarExpr s)
       | otherwise = f s
-    g (VarExpr v) = v
+    g (VarExpr v) = Set.singleton v
+    g _ = Set.empty
     toIgnore = Set.fromList $ macroArgName <$> macroArgs m
 
 getVarsExceptFromMacrosExpr :: Expr -> Set.Set String
