@@ -349,33 +349,17 @@ assembleLine
   :: (Assembler m, Monad m)
   => Map.Map String HardwareRegister  -- register allocations
   -> Map.Map String Int               -- label -> instruction index
-  -> Map.Map String Region            -- region name -> region info
-  -> Int                              -- code length (number of instructions)
+  -> (Int -> Int)                     -- label -> address
+  -> Map.Map String Int               -- region name -> region addr
   -> Instr
   -> m ()
-assembleLine regAllocs labels regions instrCount (Instr {..}) =
+assembleLine regAllocs labels labelToAddr regionAddr (Instr {..}) =
   emitInstr instrName (map processArg instrArgs)
   where
-    -- Where your emulator loads the program in RAM.
-    -- For wernsey/chip8-style cores this is normally 0x200.
-    programStart :: Int
-    programStart = 0x200
-
-    firstDataAddr :: Int
-    firstDataAddr = programStart + 2 * instrCount
-
-    -- Instruction index -> byte address
-    labelToAddr :: Int -> Int
-    labelToAddr n = programStart + 2 * n -- instructions are 2 bytes long
-
-    -- Region name -> byte address
-    regionAddr :: Map.Map String Int
-    regionAddr = assignRegions firstDataAddr regions
-
     processArg :: Expr -> Either HardwareRegister Int
     processArg (NumLit n) = Right n
     processArg (VarExpr v) =
-      case (Map.lookup v regAllocs, Map.lookup v labels, Map.lookup v regions) of
+      case (Map.lookup v regAllocs, Map.lookup v labels, Map.lookup v regionAddr) of
         -- Variable that was given a hardware register
         (Just reg, _, _) -> Left reg
         -- Label: convert from instruction index to RAM address
@@ -385,8 +369,8 @@ assembleLine regAllocs labels regions instrCount (Instr {..}) =
         -- Should not happen if your macros are well-formed
         _             -> error ("Unknown variable/label: " ++ v)
 
-assemble :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> [Line] -> Map.Map String Region -> m ()
-assemble regAllocs lines regions = let (instrs, labels) = splitLines lines in mapM_ (assembleLine regAllocs labels regions (length instrs)) instrs
+assemble :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> [Line] -> (Int -> Int) -> Map.Map String Int -> m ()
+assemble regAllocs lines labelToAddr regionAddr = let (instrs, labels) = splitLines lines in mapM_ (assembleLine regAllocs labels labelToAddr regionAddr) instrs
 
 typecheckMacro :: Map.Map String ArgType -> Macro -> Either String ()
 typecheckMacro outerVars (Macro{..}) = mapM_ (typecheckMacroLine innerVars) macroBody where
@@ -500,8 +484,8 @@ main = do
   print $ mapM_ (typecheckMacro (Map.union chip8Types codeMacroTypes)) [d | DeclMacro _ d <- codeDecls parsedCode] -- TODO check that we don't overwrite builtins. also more generally check that stuff doesnt overwrite other stuff
   g <- getStdGen
   let lines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) (Set.fromList [declRegionName d | DeclRegion d <- codeDecls parsedCode]) parsedCode) g
-  -- putStrLn "region decls:"
-  -- print $ [d | DeclRegion d <- codeDecls parsedCode]
+  putStrLn "region decls:"
+  print $ [d | DeclRegion d <- codeDecls parsedCode]
   putStrLn "inlined:"
   print lines
   let regs = fromJust $ regAlloc (fst <$> chip8Instrs) lines
@@ -509,12 +493,33 @@ main = do
   print regs
   putStrLn "assembly:"
   let linesLen = length lines
-  let regions = Map.fromList [(declRegionName d, declRegionRegion d) | DeclRegion d <- codeDecls parsedCode]
-  print $ runAssemblerBase $ assemble regs lines regions
-  putStrLn "length of instruction lines:"
-  print $ linesLen
+  let instrCount = linesLen
+  let regionMap = Map.fromList [(declRegionName d, declRegionRegion d) | DeclRegion d <- codeDecls parsedCode]
+  
+  -- Where your emulator loads the program in RAM.
+  -- For wernsey/chip8-style cores this is normally 0x200.
+  let programStart = 0x200
+  let regionAddr = regionAddr_
+        where
+          firstDataAddr :: Int
+          firstDataAddr = programStart + 2 * instrCount
+
+          -- Region name -> byte address
+          regionAddr_ :: Map.Map String Int
+          regionAddr_ = assignRegions firstDataAddr regionMap
+  let assembly = assemble regs lines labelToAddr regionAddr
+        where
+          -- Instruction index -> byte address
+          labelToAddr :: Int -> Int
+          labelToAddr n = programStart + 2 * n -- instructions are 2 bytes long
+          
+  print $ runAssemblerBase $ assembly
+  putStrLn "instruction count:"
+  print $ instrCount
+  putStrLn "region addresses:"
+  print $ Map.toList regionAddr
   putStrLn "machine:"
-  let machine = w16to8s $ renderMachineInstrs (snd <$> chip8Instrs) $ runAssemblerBase $ assemble regs lines regions
+  let machine = w16to8s $ renderMachineInstrs (snd <$> chip8Instrs) $ runAssemblerBase $ assembly
   let machineLen = length machine
   putStrLn "length of machine code:"
   print $ machineLen
