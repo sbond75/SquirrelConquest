@@ -33,8 +33,9 @@ data Line = InstrLine Instr | LabelLine String deriving (Show)
 data ArgType = RArg | WArg | RWArg | IntArg | LabelArg deriving (Show)
 data MacroArg = MacroArg { macroArgType :: ArgType, macroArgName :: String } deriving (Show)
 data MacroDecl = MacroDecl { macroName :: String, macroArgs :: [MacroArg], macroBody :: [Line] } deriving (Show)
+data RegionDecl = RegionDecl { regionName :: String, regionSize :: Word16 } deriving (Show)
 
-data Decl = DeclMacro MacroDecl deriving (Show)
+data Decl = DeclMacro MacroDecl | DeclRegion RegionDecl deriving (Show)
 
 data Code = Code [Decl] deriving (Show)
 
@@ -87,8 +88,18 @@ macroArg = MacroArg <$> (argType <* space1) <*> identifier
 macroDecl :: Parser MacroDecl
 macroDecl = string "macro" >> space1 >> (MacroDecl <$> lexeme identifier <*> (lexeme (char '(') >> sepBy (lexeme macroArg) (lexeme $ char ',') <* lexeme (char ')') <* lexeme (char '{')) <*> many (lexeme line)) <* char '}'
 
+word16 :: Parser Word16
+word16 = read <$> some digitChar
+
+regionDecl :: Parser RegionDecl
+regionDecl = string "region" >> space1 >> (RegionDecl <$> lexeme identifier <*> lexeme word16)
+
 decl :: Parser Decl
-decl = DeclMacro <$> macroDecl
+decl =
+  try macro <|> region
+  where
+    macro = DeclMacro <$> macroDecl
+    region = DeclRegion <$> regionDecl
 
 code :: Parser Code
 code = spaceConsumer *> (Code <$> many (lexeme decl))
@@ -135,17 +146,20 @@ inlineMacro excl args decl = (\localMap -> runIdentity . replaceVars (replaceFun
   localSet = privateVars (excl `Set.union` argSet) decl
   genLocalMap = Map.fromList <$> (sequence $ (\v -> (v,) . VarExpr <$> genVar v) <$> Set.toList localSet)
 
-inlineAllMacros :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> (String -> m MacroDecl) -> MacroDecl -> m MacroDecl
-inlineAllMacros builtins globalExcl decls decl = (\newBody -> decl { macroBody = concat newBody }) <$> sequence (replaceLine <$> macroBody decl) where
-  replaceLine (InstrLine instr) | not (instrName instr `Set.member` builtins) = decls (instrName instr) >>= inlineMacro globalExcl (instrArgs instr)
+inlineAllMacros :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> (String -> m MacroDecl) -> (String -> RegionDecl) -> MacroDecl -> m MacroDecl
+inlineAllMacros builtins globalExcl macroDecls regionDecls decl = (\newBody -> decl { macroBody = concat newBody }) <$> sequence (replaceLine <$> macroBody decl) where
+  replaceLine (InstrLine instr) | not (instrName instr `Set.member` builtins) = macroDecls (instrName instr) >>= inlineMacro globalExcl (instrArgs instr)
   replaceLine line = pure [line]
 
 fullyInlineCodeMacro :: (VarGen m, Monad m) => Set.Set String -> Code -> String -> m MacroDecl
 fullyInlineCodeMacro builtins (Code declList) = f where
-  f = inlineAllMacros builtins globalExcl f . lookupDeclMap
-  lookupDeclMap m = fromJust $ Map.lookup m declMap
-  macroDeclList = (\(DeclMacro d) -> d) <$> declList
-  declMap = Map.fromList $ (\d -> (macroName d, d)) <$> macroDeclList
+  f = inlineAllMacros builtins globalExcl (f . lookupMacroDeclMap) lookupRegionDeclMap
+  lookupMacroDeclMap m = fromJust $ Map.lookup m macroDeclMap
+  lookupRegionDeclMap m = fromJust $ Map.lookup m regionDeclMap
+  macroDeclList = [d | DeclMacro d <- declList]
+  regionDeclList = [r | DeclRegion r <- declList]
+  macroDeclMap = Map.fromList $ (\d -> (macroName d, d)) <$> macroDeclList
+  regionDeclMap = Map.fromList $ (\d -> (regionName d, d)) <$> regionDeclList
   globalExcl = Set.empty
 
 codeToLines :: (VarGen m, Monad m) => Set.Set String -> Code -> m [Line]
@@ -347,6 +361,7 @@ main = do
   print $ runAssemblerBase $ assemble regs lines
   putStrLn "machine:"
   let machine = w16to8s $ renderMachineInstrs (snd <$> chip8Instrs) $ runAssemblerBase $ assemble regs lines
+  let machineLen = length machine
   print $ fmap (flip showHex "") $ machine
   BS.writeFile "game.ch8" $ BS.pack machine
   putStrLn "wrote file"

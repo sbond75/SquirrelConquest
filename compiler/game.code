@@ -1,3 +1,5 @@
+region player 2
+
 macro setir(r memloc) {
   seti 0;
   addi memloc;
