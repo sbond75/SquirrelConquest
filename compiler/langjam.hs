@@ -32,9 +32,11 @@ data Line = InstrLine Instr | LabelLine String deriving (Show)
 
 data ArgType = RArg | WArg | RWArg | IntArg | LabelArg | MacroValArg {-TODO clunky name-} [ArgType] deriving (Show, Eq)
 data MacroArg = MacroArg { macroArgType :: ArgType, macroArgName :: String } deriving (Show)
-data Macro = Macro { macroArgs :: [MacroArg], macroCaptured :: [String], macroBody :: [Line] } deriving (Show)
 
-data Decl = DeclMacro { declMacroName :: String, declMacroMacro :: Macro } deriving (Show)
+data Macro = Macro { macroArgs :: [MacroArg], macroCaptured :: [String], macroBody :: [Line] } deriving (Show)
+data RegionDecl = RegionDecl { regionName :: String, regionSize :: Word16 } deriving (Show)
+
+data Decl = DeclMacro { declMacroName :: String, declMacroMacro :: Macro } | DeclRegion RegionDecl deriving (Show)
 
 data Code = Code { codeDecls :: [Decl] } deriving (Show)
 
@@ -97,8 +99,18 @@ args = lexeme (char '(') >> sepBy (lexeme macroArg) (lexeme $ char ',') <* lexem
 macroLines :: Parser [Line]
 macroLines = lexeme (char '{') >> many (lexeme line) <* lexeme (char '}')
 
+word16 :: Parser Word16
+word16 = read <$> some digitChar
+
+regionDecl :: Parser RegionDecl
+regionDecl = string "region" >> space1 >> (RegionDecl <$> lexeme identifier <*> lexeme word16)
+
 decl :: Parser Decl
-decl = fixupMacroDeclCaptureVars <$> (lexeme (string "macro" >> space1) >> ((\a b c -> DeclMacro a (Macro b [] c)) <$> lexeme identifier <*> args <*> macroLines))
+decl =
+  try macro <|> region
+  where
+    macro = fixupMacroDeclCaptureVars <$> (lexeme (string "macro" >> space1) >> ((\a b c -> DeclMacro a (Macro b [] c)) <$> lexeme identifier <*> args <*> macroLines))
+    region = DeclRegion <$> regionDecl
 
 macroExpr :: Parser Expr
 macroExpr = MacroExpr . Macro [] [] <$> macroLines
@@ -463,6 +475,7 @@ main = do
   print $ runAssemblerBase $ assemble regs lines
   putStrLn "machine:"
   let machine = w16to8s $ renderMachineInstrs (snd <$> chip8Instrs) $ runAssemblerBase $ assemble regs lines
+  let machineLen = length machine
   print $ fmap (flip showHex "") $ machine
   BS.writeFile "game.ch8" $ BS.pack machine
   putStrLn "wrote file"
