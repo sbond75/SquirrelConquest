@@ -23,6 +23,7 @@ import Data.Bits (shiftL, shiftR, (.|.))
 import Control.Monad.Writer (Writer, runWriter, tell)
 import Numeric (showHex)
 import qualified Data.ByteString as BS
+import Data.List (mapAccumL)
 
 type Parser = Parsec Void T.Text
 
@@ -331,14 +332,28 @@ instance Assembler AssemblerBase where
 runAssemblerBase :: AssemblerBase () -> [(String, [Either HardwareRegister Int])]
 runAssemblerBase = snd . runWriter . assemblerBase
 
+regionsToList :: Map.Map String Region -> [(String, Int)]
+regionsToList =
+  map (\(name, Region{..}) -> (name, fromIntegral regionSize)) . Map.toList
+
+assignRegions :: Int -> Map.Map String Region -> Map.Map String Int
+assignRegions start regions =
+  Map.fromList (snd (mapAccumL step start (regionsToList regions)))
+  where
+    step addr (name, size) =
+      let addr' = addr + size
+      in (addr', (name, addr))
+
 -- TODO endianness
 assembleLine
   :: (Assembler m, Monad m)
   => Map.Map String HardwareRegister  -- register allocations
   -> Map.Map String Int               -- label -> instruction index
+  -> Map.Map String Region            -- region name -> region info
+  -> Int                              -- code length (number of instructions)
   -> Instr
   -> m ()
-assembleLine regAllocs labels (Instr {..}) =
+assembleLine regAllocs labels regions instrCount (Instr {..}) =
   emitInstr instrName (map processArg instrArgs)
   where
     -- Where your emulator loads the program in RAM.
@@ -346,23 +361,32 @@ assembleLine regAllocs labels (Instr {..}) =
     programStart :: Int
     programStart = 0x200
 
+    firstDataAddr :: Int
+    firstDataAddr = programStart + 2 * instrCount
+
     -- Instruction index -> byte address
     labelToAddr :: Int -> Int
-    labelToAddr n = programStart + 2 * n
+    labelToAddr n = programStart + 2 * n -- instructions are 2 bytes long
+
+    -- Region name -> byte address
+    regionAddr :: Map.Map String Int
+    regionAddr = assignRegions firstDataAddr regions
 
     processArg :: Expr -> Either HardwareRegister Int
     processArg (NumLit n) = Right n
     processArg (VarExpr v) =
-      case (Map.lookup v regAllocs, Map.lookup v labels) of
+      case (Map.lookup v regAllocs, Map.lookup v labels, Map.lookup v regions) of
         -- Variable that was given a hardware register
-        (Just reg, _) -> Left reg
+        (Just reg, _, _) -> Left reg
         -- Label: convert from instruction index to RAM address
-        (_, Just n)   -> Right (labelToAddr n)
+        (_, Just n, _)   -> Right (labelToAddr n)
+        -- Region: find an assigned address
+        (_, _, Just r)   -> Right (regionAddr Map.! v)
         -- Should not happen if your macros are well-formed
         _             -> error ("Unknown variable/label: " ++ v)
 
-assemble :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> [Line] -> m ()
-assemble regAllocs lines = let (instrs, labels) = splitLines lines in mapM_ (assembleLine regAllocs labels) instrs
+assemble :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> [Line] -> Map.Map String Region -> m ()
+assemble regAllocs lines regions = let (instrs, labels) = splitLines lines in mapM_ (assembleLine regAllocs labels regions (length instrs)) instrs
 
 typecheckMacro :: Map.Map String ArgType -> Macro -> Either String ()
 typecheckMacro outerVars (Macro{..}) = mapM_ (typecheckMacroLine innerVars) macroBody where
@@ -475,17 +499,25 @@ main = do
   putStrLn "typecheck:"
   print $ mapM_ (typecheckMacro (Map.union chip8Types codeMacroTypes)) [d | DeclMacro _ d <- codeDecls parsedCode] -- TODO check that we don't overwrite builtins. also more generally check that stuff doesnt overwrite other stuff
   g <- getStdGen
-  let lines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) Set.empty parsedCode) g
+  let lines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) (Set.fromList [declRegionName d | DeclRegion d <- codeDecls parsedCode]) parsedCode) g
+  -- putStrLn "region decls:"
+  -- print $ [d | DeclRegion d <- codeDecls parsedCode]
   putStrLn "inlined:"
   print lines
   let regs = fromJust $ regAlloc (fst <$> chip8Instrs) lines
   putStrLn "register allocation:"
   print regs
   putStrLn "assembly:"
-  print $ runAssemblerBase $ assemble regs lines
+  let linesLen = length lines
+  let regions = Map.fromList [(declRegionName d, declRegionRegion d) | DeclRegion d <- codeDecls parsedCode]
+  print $ runAssemblerBase $ assemble regs lines regions
+  putStrLn "length of instruction lines:"
+  print $ linesLen
   putStrLn "machine:"
-  let machine = w16to8s $ renderMachineInstrs (snd <$> chip8Instrs) $ runAssemblerBase $ assemble regs lines
+  let machine = w16to8s $ renderMachineInstrs (snd <$> chip8Instrs) $ runAssemblerBase $ assemble regs lines regions
   let machineLen = length machine
+  putStrLn "length of machine code:"
+  print $ machineLen
   print $ fmap (flip showHex "") $ machine
   BS.writeFile "game.ch8" $ BS.pack machine
   putStrLn "wrote file"

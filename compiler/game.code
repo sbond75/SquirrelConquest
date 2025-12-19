@@ -32,13 +32,13 @@ macro writeMemConst(int memloc, int val) {
 
 /* Set I to player sprite and draw it at (px, py) */
 macro drawPlayer(r px, r py) {
-  seti 300;          # TODO: sprite data at I = 300
+  seti player;          # TODO: sprite data at I = player
   draw px, py, 5;    # TODO: 5 = sprite height
 }
 
 /* Erase sprite at old position using XOR draw */
 macro erasePlayer(r oldx, r oldy) {
-  seti 300;
+  seti player;
   draw oldx, oldy, 5;
 }
 
