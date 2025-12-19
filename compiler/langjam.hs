@@ -304,7 +304,7 @@ chip8Instrs = Map.fromList
   , ("shl", (([RWArg], Nothing), MachineInstr 0x800E)) -- TODO VF
   , ("skipifneq", (([RArg, RArg], Just $ Set.fromList [1, 2]), MachineInstr 0x9000))
   , ("seti", (([IntArg], Nothing), MachineInstr 0xA000)) -- TODO I
-  , ("rand", (([RArg, IntArg], Nothing), MachineInstr 0xC000)) -- TODO or w?
+  , ("rand", (([WArg, IntArg], Nothing), MachineInstr 0xC000))
   , ("draw", (([RArg, RArg, IntArg], Nothing), MachineInstr 0xD000)) -- TODO I
   , ("skipifkey", (([RArg], Just $ Set.fromList [1, 2]), MachineInstr 0xE09E))
   , ("skipifnkey", (([RArg], Just $ Set.fromList [1, 2]), MachineInstr 0xE0A1))
