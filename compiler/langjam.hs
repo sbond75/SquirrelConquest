@@ -523,9 +523,9 @@ main = do
   putStrLn "machine:"
   let machine = w16to8s $ renderMachineInstrs (snd <$> chip8Instrs) $ runAssemblerBase $ assembly
   let machineLen = length machine
+  print $ fmap (flip showHex "") $ machine
   putStrLn "length of machine code:"
   print $ machineLen
-  print $ fmap (flip showHex "") $ machine
   BS.writeFile "game.ch8" $ BS.pack machine
   putStrLn "wrote file"
   putStrLn ""
