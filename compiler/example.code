@@ -37,9 +37,9 @@ macro ifNZ(r cond, macro() ifCase, macro() elseCase) {
 }
 
 macro fooo(macro(rw) q, macro(rw, rw) s) {
-  set x, 1;
-  set y, 2;
-  set z, 3;
+  setn x, 1;
+  setn y, 2;
+  setn z, 3;
   q x;
   s y, z;
 }
