@@ -24,6 +24,7 @@ import Control.Monad.Writer (Writer, runWriter, tell)
 import Numeric (showHex)
 import qualified Data.ByteString as BS
 import Data.List (mapAccumL)
+import Control.Exception (assert)
 
 type Parser = Parsec Void T.Text
 
@@ -494,7 +495,7 @@ main = do
   putStrLn "register allocation:"
   print regs
   putStrLn "assembly:"
-  let linesLen = length lines
+  let linesLen = length [x | InstrLine x <- lines]
   let instrCount = linesLen
   let regionMap = Map.fromList [(declRegionName d, declRegionRegion d) | DeclRegion d <- codeDecls parsedCode]
   
@@ -524,8 +525,11 @@ main = do
   let machine = w16to8s $ renderMachineInstrs (snd <$> chip8Instrs) $ runAssemblerBase $ assembly
   let machineLen = length machine
   print $ fmap (flip showHex "") $ machine
-  putStrLn "length of machine code:"
+  putStrLn "length of machine code (bytes):"
   print $ machineLen
+  putStrLn "end address of machine code:"
+  print $ programStart + machineLen
+  assert (instrCount * 2 == machineLen) (pure ())
   BS.writeFile "game.ch8" $ BS.pack machine
   putStrLn "wrote file"
   putStrLn ""
