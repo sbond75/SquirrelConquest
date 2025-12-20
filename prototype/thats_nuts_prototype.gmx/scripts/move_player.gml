@@ -47,10 +47,14 @@ if (dx != 0 || dy != 0)
     if newY >= global.mapHeight {
         newY = global.mapHeight - 1
     }
+    
+    var newT;
+    newT = get_tile(newX, newY)
 
-    // When not on a branch, move freely.
-    // When on a branch, only allow moving onto another branch tile.
-    if (!onBranch || get_tile(newX, newY) == global.tileTBranch)
+    // When not on a branch, move freely unless we hit a trunk.
+    // When on a branch, only allow moving onto another branch or trunk tile.
+    if ((!onBranch && newT != global.tileTTrunk)
+    || (onBranch && (newT == global.tileTBranch || newT == global.tileTTrunk)))
     {
         tileX = newX;
         tileY = newY;
