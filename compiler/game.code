@@ -732,7 +732,7 @@ macro drawViewAroundPlayer(r tileX, r tileY) {
   clear;
 
   # Outer loop: viewY = 0..3
-  set viewY, 0;
+  setn viewY, 0;
 viewY_loop:
   # screenY = viewY * tileSize (8)
   set screenY, viewY;
@@ -745,7 +745,7 @@ viewY_loop:
   add worldY, viewY;
 
   # Inner loop: viewX = 0..7
-  set viewX, 0;
+  setn viewX, 0;
 viewX_loop:
   # screenX = viewX * 8
   set screenX, viewX;
