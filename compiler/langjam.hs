@@ -601,7 +601,7 @@ w32to8 Chip83 w = [fromIntegral $ shiftR w 12, fromIntegral $ shiftR w 8, fromIn
 w32to8s :: Mode -> [Word32] -> [Word8]
 w32to8s m = concatMap (w32to8 m)
 
-data Mode = Vanilla | Chip83
+data Mode = Vanilla | Chip83 deriving (Eq)
 
 getCodeMacroTypes :: Code -> Map.Map String ArgType
 getCodeMacroTypes c = Map.fromList [(declMacroName, MacroValArg $ fmap macroArgType $ macroArgs $ declMacroMacro) | DeclMacro {..} <- codeDecls c]
@@ -641,6 +641,9 @@ main = do
   putStrLn "const decls:"
   print $ [d | DeclConst d <- codeDecls parsedCode]
   
+  let mode = Chip83
+  let instrSizeBytes = if mode == Chip83 then 3 else 2
+  
   let regionMap = Map.fromList [(declRegionName d, declRegionRegion d) | DeclRegion d <- codeDecls parsedCode]
   let constMap = Map.fromList [(declConstName d, declConstConst d) | DeclConst d <- codeDecls parsedCode]
   let userInstrCount :: Int
@@ -657,7 +660,7 @@ main = do
   let programStart = 0x200
   
   let firstDataAddr :: Int
-      firstDataAddr = programStart + 2 * totalInstrCount
+      firstDataAddr = programStart + instrSizeBytes * totalInstrCount
 
   -- Region name -> byte address
   let regionAddr :: Map.Map String Int
@@ -691,7 +694,7 @@ main = do
   putStrLn "total instruction count:"
   print $ totalInstrCount
   putStrLn "machine:"
-  let machine = w32to8s Chip83 $ renderMachineInstrs (snd <$> chip8Instrs) Chip83 $ runAssemblerBase $ assembly
+  let machine = w32to8s mode $ renderMachineInstrs (snd <$> chip8Instrs) mode $ runAssemblerBase $ assembly
   let machineLen = length machine
   print $ fmap (flip showHex "") $ machine
   putStrLn "length of machine code (bytes):"
@@ -707,7 +710,7 @@ main = do
                  Nothing    -> endInstructionsAddr)
             (Map.lookupMax regionAddr)
   print $ highestUsed
-  assert (totalInstrCount * 2 == machineLen) (pure ())
+  assert (totalInstrCount * instrSizeBytes == machineLen) (pure ())
   BS.writeFile "game.ch8" $ BS.pack machine
   putStrLn "wrote file"
   putStrLn ""
