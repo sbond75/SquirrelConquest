@@ -98,7 +98,7 @@ region nutSlots 48; #nutSlotsBytes;
 /* Compute byte offset of nut slot `idx`:
    off = idx * nutSlotBytes (3)
 */
-macro nutSlotOffset(r idx, w off) {
+macro nutSlotOffset(r idx, rw off) {
   set off, idx;
   add off, idx;     # off = 2*idx
   add off, idx;     # off = 3*idx
@@ -253,7 +253,7 @@ region enemySlots 256; #enemySlotsBytes;
 /* Compute byte offset of enemy slot `idx`:
    off = idx * enemySlotBytes (4)
 */
-macro enemySlotOffset(r idx, w off) {
+macro enemySlotOffset(r idx, rw off) {
   set off, idx;
   shl off;          # *2
   shl off;          # *4
@@ -540,7 +540,7 @@ macro playerInit() {
 # Given tileX, tileY (0..31), compute:
 #   byteIdx : which byte in tilemap
 #   subIdx  : which 2-bit slot (0..3)
-macro tileCoordToByteAndSubIndex(r tileX, r tileY, w byteIdx, w subIdx) {
+macro tileCoordToByteAndSubIndex(r tileX, r tileY, rw byteIdx, rw subIdx) {
   # byteIdx = tileY * 8
   set byteIdx, tileY;
   shl byteIdx;       # *2
@@ -620,7 +620,7 @@ tile_done:
 
 # --- Camera ---
 
-macro computeCameraFromPlayer(r tileX, r tileY, w camX, w camY) {
+macro computeCameraFromPlayer(r tileX, r tileY, rw camX, rw camY) {
   # ---------------- X axis ----------------
   set camX, tileX;
 
