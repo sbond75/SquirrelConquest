@@ -29,6 +29,7 @@ import qualified Data.Text.IO as TIO
 import System.Environment (getArgs)
 import System.Exit (die)
 import GHC.Stack (HasCallStack, prettyCallStack, callStack)
+import Data.Either.Extra (mapLeft)
 
 lookupOrDie
     :: (Ord k, Show k, HasCallStack)
@@ -488,7 +489,8 @@ assemble :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> [Line] 
 assemble regAllocs lines labelToAddr regionAddr consts = let (instrs, labels) = splitLines lines in mapM_ (assembleLine regAllocs labels labelToAddr regionAddr consts) instrs
 
 typecheckMacro :: Map.Map String ArgType -> Macro -> Either String ()
-typecheckMacro outerVars (Macro{..}) = mapM_ (typecheckMacroLine innerVars) macroBody where
+typecheckMacro outerVars (Macro{..}) = mapM_ (uncurry doLine) (zip [1..] macroBody) where
+  doLine lineNum = mapLeft (("Line " <> show lineNum <> ": ") <>) . typecheckMacroLine innerVars
   labelVars = Set.fromList $ catMaybes $ gatherLabelVar <$> macroBody
   gatherLabelVar (LabelLine l) = Just l
   gatherLabelVar _ = Nothing
@@ -615,7 +617,7 @@ main = do
   let consts = Set.fromList [declConstName d | DeclConst d <- codeDecls parsedCode]
   let constsTypes = Map.fromList $ zip (Set.toList consts) (repeat IntArg)
   putStrLn "typecheck:"
-  print $ mapM_ (typecheckMacro (Map.union chip8Types $ Map.union regionsTypes $ Map.union constsTypes codeMacroTypes)) [d | DeclMacro _ d <- codeDecls parsedCode] -- TODO check that we don't overwrite builtins. also more generally check that stuff doesnt overwrite other stuff
+  print $ mapM_ (\(n,d) -> mapLeft (("Macro " <> n <> ": ") <>) $ typecheckMacro (Map.union chip8Types $ Map.union regionsTypes $ Map.union constsTypes codeMacroTypes) d) [(n,d) | DeclMacro n d <- codeDecls parsedCode] -- TODO check that we don't overwrite builtins. also more generally check that stuff doesnt overwrite other stuff
   g <- getStdGen
   let userLines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) (Set.fromList ([declRegionName d | DeclRegion d <- codeDecls parsedCode] ++ [ declConstName  c | DeclConst  c <- codeDecls parsedCode ])) parsedCode) g
   putStrLn "region decls:"
