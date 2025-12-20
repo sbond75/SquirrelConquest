@@ -530,8 +530,7 @@ renderMachineInstr (MachineInstr{..}) Vanilla = foldl (.|.) baseBytes . fmap pro
   processArg (argNum, Left v) = shiftL (fromIntegral $ fromEnum v) (8 - 4*argNum)
   -- number values are all the way to the right, so we don't need to worry about shifting them; additional space changes their max value, not their shift amt
   processArg (_, Right n) = fromIntegral n
-renderMachineInstr (MachineInstr{..}) Chip83 = foldl (.|.) baseBytes' . fmap processArg . zip [0..] where
-  baseBytes' = (shiftL baseBytes 8 .&. 0xFF0000) .|. (baseBytes .&. 0xFF)
+renderMachineInstr (MachineInstr{..}) Chip83 = foldl (.|.) (shiftL baseBytes 8) . fmap processArg . zip [0..] where
   -- each increment of argNum we shift 4 less
   -- we start at position 2 ie <<8
   processArg (argNum, Left v) = shiftL (fromIntegral $ fromEnum v) (16 - 4*argNum)
@@ -672,7 +671,7 @@ main = do
   
   -- Instruction index -> byte address
   let labelToAddr :: Int -> Int
-      labelToAddr n = programStart + 2 * n -- instructions are 2 bytes long
+      labelToAddr n = programStart + instrSizeBytes * n -- instructions are 2 bytes long
   
   -- Actual init code to run before user code
   let initLines :: [Line]
