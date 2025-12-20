@@ -177,6 +177,34 @@ region spr_trunk auto  0b00100000
 	             , 0b00100010
 	             , 0b01000001
 
+region spr_eagle auto  0b10000001
+	             , 0b11000011
+	             , 0b11100011
+	             , 0b01111110
+	             , 0b00111100
+	             , 0b00011000
+	             , 0b00100100
+	             , 0b00000000
+
+region spr_nut auto    0b00100000
+	             , 0b00101000
+	             , 0b00111100
+	             , 0b01111100
+	             , 0b01111111
+	             , 0b11111100
+	             , 0b00100010
+	             , 0b01000001
+
+region spr_rattlesnake auto
+		       0b00100000
+	             , 0b00101000
+	             , 0b00111100
+	             , 0b01111100
+	             , 0b01111111
+	             , 0b11111100
+	             , 0b00100010
+	             , 0b01000001
+
 # --- Map / tiles ---
 
 const mapWidth      32;
@@ -1169,11 +1197,11 @@ tree_done:
   # --- 3. Place enemies ----------------------------------------------
 
   # Example target counts: 8 rattlesnakes, then up to 16 total with eagles.
-  setn limR, 8;
-  spawnRattlesnakes limR, 16, 16;
+  #setn limR, 8;
+  spawnRattlesnakes 8, 16, 16;
 
-  setn limE, 16;       # total enemyCounter target after eagles
-  spawnEagles limE, 16, 16;
+  #setn limE, 16;       # total enemyCounter target after eagles
+  spawnEagles 16, 16, 16;
 }
 
 # Try to place one acorn at (mx,my), given center exclusion.
@@ -1249,7 +1277,7 @@ nut_outer_mx:
 
     # Stop if nutCounter reached targetNut
     getNutCounter curNut;
-    setn tmpNutLimit, targetNut;
+    set tmpNutLimit, targetNut;
     skipifeq curNut, tmpNutLimit;
     goto nut_do_cell;
     goto spawnAcorns_done;
@@ -1319,7 +1347,7 @@ macro spawnRattlesnakes(int lim, int centerX, int centerY) {
 
 rs_outer_while:
   getEnemyCounter curErs;
-  setn limRS, targetEnemiesRS;
+  set limRS, targetEnemiesRS;
   skipifeq curErs, limRS;
   goto rs_do_sweep;
   goto rs_done;
@@ -1332,7 +1360,7 @@ rs_mx_loop:
 
     # Re-check target each tile
     getEnemyCounter curErs2;
-    setn limRS2, targetEnemiesRS;
+    set limRS2, targetEnemiesRS;
     skipifeq curErs2, limRS2;
     goto rs_cell;
     goto rs_done;
@@ -1424,7 +1452,7 @@ macro spawnEagles(int lim, int centerX, int centerY) {
 
 re_outer_while:
   getEnemyCounter curEe;
-  setn limRE, targetEnemiesRE;
+  set limRE, targetEnemiesRE;
   skipifeq curEe, limRE;
   goto re_do_sweep;
   goto re_done;
@@ -1437,7 +1465,7 @@ re_mx_loop:
 
     # Re-check target each tile
     getEnemyCounter curEe2;
-    setn limRE2, targetEnemiesRE;
+    set limRE2, targetEnemiesRE;
     skipifeq curEe2, limRE2;
     goto re_cell;
     goto re_done;
@@ -1659,6 +1687,164 @@ camy_done_y:
 
 # --- Drawing helpers ---
 
+# Draw any acorn that lives on world tile (worldX,worldY),
+# at screen position (screenX,screenY).
+macro drawNutsAtCell(r worldX, r worldY, r screenX, r screenY) {
+  # nutLimit = nutCounter
+  getNutCounter nutLimit;
+
+  setn nutIdx, 0;
+nut_loop:
+  # while (nutIdx != nutLimit)
+  skipifeq nutIdx, nutLimit;
+  goto nut_body;
+  goto nut_done;
+
+nut_body:
+  # load this nut's tile coordinates
+  nutGetTileX nutIdx, nutX;
+  nutGetTileY nutIdx, nutY;
+
+  # if nutX != worldX: continue
+  set tmpX, nutX;
+  skipifeq tmpX, worldX;
+  goto nut_next;
+
+  # if nutY != worldY: continue
+  set tmpY, nutY;
+  skipifeq tmpY, worldY;
+  goto nut_next;
+
+  # match: draw a nut sprite aligned to this tile
+  seti spr_nut;
+  draw screenX, screenY, 8;
+
+  # assume at most one nut per tile → break
+  goto nut_done;
+
+nut_next:
+  addn nutIdx, 1;
+  goto nut_loop;
+
+nut_done:
+}
+
+# Draw any enemy that lives on world tile (worldX,worldY),
+# at screen position (screenX,screenY).
+#
+# Convention:
+#   enemy slot 0..7   : rattlesnakes (spr_rattlesnake)
+#   enemy slot >= 8   : eagles      (spr_eagle)
+macro drawEnemiesAtCell(r worldX, r worldY, r screenX, r screenY) {
+  # enemyLimit = enemyCounter
+  getEnemyCounter enemyLimit;
+
+  setn eIdx, 0;
+enemy_loop:
+  # while (eIdx != enemyLimit)
+  skipifeq eIdx, enemyLimit;
+  goto enemy_body;
+  goto enemy_done;
+
+enemy_body:
+  # load this enemy's tile coordinates
+  enemyGetTileX eIdx, ex;
+  enemyGetTileY eIdx, ey;
+
+  # if ex != worldX: continue
+  set tmpX, ex;
+  skipifeq tmpX, worldX;
+  goto enemy_next;
+
+  # if ey != worldY: continue
+  set tmpY, ey;
+  skipifeq tmpY, worldY;
+  goto enemy_next;
+
+  # Tile match: choose sprite based on slot index.
+  # Slots 0..7 → rattlesnake, else eagle.
+
+  set idxCmp, eIdx;
+
+  # eIdx == 0?
+  skipifeqn idxCmp, 0;
+  goto enemy_not0;
+  seti spr_rattlesnake;
+  draw screenX, screenY, 8;
+  goto enemy_draw_done;
+enemy_not0:
+
+  # eIdx == 1?
+  skipifeqn idxCmp, 1;
+  goto enemy_not1;
+  seti spr_rattlesnake;
+  draw screenX, screenY, 8;
+  goto enemy_draw_done;
+enemy_not1:
+
+  # eIdx == 2?
+  skipifeqn idxCmp, 2;
+  goto enemy_not2;
+  seti spr_rattlesnake;
+  draw screenX, screenY, 8;
+  goto enemy_draw_done;
+enemy_not2:
+
+  # eIdx == 3?
+  skipifeqn idxCmp, 3;
+  goto enemy_not3;
+  seti spr_rattlesnake;
+  draw screenX, screenY, 8;
+  goto enemy_draw_done;
+enemy_not3:
+
+  # eIdx == 4?
+  skipifeqn idxCmp, 4;
+  goto enemy_not4;
+  seti spr_rattlesnake;
+  draw screenX, screenY, 8;
+  goto enemy_draw_done;
+enemy_not4:
+
+  # eIdx == 5?
+  skipifeqn idxCmp, 5;
+  goto enemy_not5;
+  seti spr_rattlesnake;
+  draw screenX, screenY, 8;
+  goto enemy_draw_done;
+enemy_not5:
+
+  # eIdx == 6?
+  skipifeqn idxCmp, 6;
+  goto enemy_not6;
+  seti spr_rattlesnake;
+  draw screenX, screenY, 8;
+  goto enemy_draw_done;
+enemy_not6:
+
+  # eIdx == 7?
+  skipifeqn idxCmp, 7;
+  goto enemy_default_eagle;
+  seti spr_rattlesnake;
+  draw screenX, screenY, 8;
+  goto enemy_draw_done;
+
+enemy_default_eagle:
+  # All other slots: eagle
+  seti spr_eagle;
+  draw screenX, screenY, 8;
+
+enemy_draw_done:
+  # assume at most one enemy per tile → break
+  goto enemy_done;
+
+enemy_next:
+  addn eIdx, 1;
+  goto enemy_loop;
+
+enemy_done:
+}
+
 macro drawViewAroundPlayer(r tileX, r tileY) {
   # Compute camera top-left in tile space
   computeCameraFromPlayer tileX, tileY, camX, camY;
@@ -1708,14 +1894,20 @@ non_air:
   goto maybe_trunk;
   seti spr_branch;
   draw screenX, screenY, 8;
-  goto viewX_next;
+  goto after_tile_sprite;
 
 maybe_trunk:
   setn tmp, tileTTrunk;
   skipifeq tileType, tmp;
-  goto viewX_next;
+  goto after_tile_sprite;
   seti spr_trunk;
   draw screenX, screenY, 8;
+
+after_tile_sprite:
+  # Draw things that sit on this tile.
+  # worldX, worldY, screenX, screenY are already set by the loops.
+  drawNutsAtCell worldX, worldY, screenX, screenY;
+  drawEnemiesAtCell worldX, worldY, screenX, screenY;
 
 viewX_next:
   addn viewX, 1;
