@@ -1,5 +1,15 @@
 # --- Control flow helpers --- =========================================================
 
+macro ifNZ(r cond, macro() ifCase, macro() elseCase) {
+  skipifneqn cond, 0;
+  goto a;
+  ifCase;
+  goto done;
+  a:
+  elseCase;
+  done:
+}
+
 # ============================================================
 # ifeq / ifneq
 #   ifeq(x, y,  ifCase, elseCase)
@@ -844,16 +854,613 @@ macro setTileTrunk(r tileX, r tileY) {
 #   mapWidth = mapHeight = 32, so just mask with 31
 # ============================================================
 
-macro randTileX(w out) {
+macro randTileX(rw out) {
   rand out, 255;      # random byte
   setn mask, 31;      # 0b00011111
   band out, mask;     # 0..31
 }
 
-macro randTileY(w out) {
+macro randTileY(rw out) {
   rand out, 255;
   setn mask, 31;
   band out, mask;
+}
+
+# --- Chance helpers ---------------------------------------------------
+
+# Roughly "1 in 64" chance
+macro randomChance1in64(macro() body) {
+  rand chanceRand64, 63;      # AND 0x3F
+  skipifeqn chanceRand64, 0;
+  goto randomChance1in64_done;
+  body;
+randomChance1in64_done:
+}
+
+# Roughly "1 in 32" chance (≈ twice as likely)
+macro randomChance1in32(macro() body) {
+  rand chanceRand32, 31;      # AND 0x1F
+  skipifeqn chanceRand32, 0;
+  goto randomChance1in32_done;
+  body;
+randomChance1in32_done:
+}
+
+# --- Counter helpers --------------------------------------------------
+
+macro getNutCounter(w out) {
+  setn off, 0;
+  seti nutCounter;
+  addi off;
+  regload;
+  getzero out;
+}
+
+macro setNutCounter(r val) {
+  setn off, 0;
+  seti nutCounter;
+  addi off;
+  setzero val;
+  regdump;
+}
+
+macro getEnemyCounter(w out) {
+  setn offE, 0;
+  seti enemyCounter;
+  addi offE;
+  regload;
+  getzero out;
+}
+
+macro setEnemyCounter(r val) {
+  setn offE, 0;
+  seti enemyCounter;
+  addi offE;
+  setzero val;
+  regdump;
+}
+
+# Allocate next nut slot.
+#   idx: slot index (0..numNuts-1) if ok==1
+#   ok : 1 = success, 0 = full
+macro allocNutSlot(rw idx, w ok) {
+  getNutCounter idx;
+  setn limitN, numNuts;
+
+  set tmpN, idx;
+  skipifeq tmpN, limitN;
+  goto allocNut_ok;
+  setn ok, 0;
+  goto allocNut_done;
+
+allocNut_ok:
+  setn ok, 1;
+  set tmpN2, idx;
+  addn tmpN2, 1;
+  setNutCounter tmpN2;
+
+allocNut_done:
+}
+
+# Allocate next enemy slot.
+#   idx: slot index (0..numEnemies-1) if ok==1
+#   ok : 1 = success, 0 = full
+macro allocEnemySlot(rw idx, w ok) {
+  getEnemyCounter idx;
+  setn limitE, numEnemies;
+
+  set tmpE, idx;
+  skipifeq tmpE, limitE;
+  goto allocEnemy_ok;
+  setn ok, 0;
+  goto allocEnemy_done;
+
+allocEnemy_ok:
+  setn ok, 1;
+  set tmpE2, idx;
+  addn tmpE2, 1;
+  setEnemyCounter tmpE2;
+
+allocEnemy_done:
+}
+
+# out = 1 if (mx,my) is in the center exclusion region, else 0.
+# For now we only exclude the exact center tile.
+macro inCenterExcludeSimple(r mx, r my, int centerX, int centerY, w out) {
+  # Default: not excluded
+  setn out, 0;
+
+  set tx, mx;
+  setn cxImm, centerX;
+  skipifeqn tx, cxImm;
+  goto not_excluded_center;
+
+  set ty, my;
+  setn cyImm, centerY;
+  skipifeqn ty, cyImm;
+  goto not_excluded_center;
+
+  # Both coordinates match center
+  setn out, 1;
+  goto excl_done;
+
+not_excluded_center:
+  setn out, 0;
+
+excl_done:
+}
+
+const levelGenTrees 20;    # number of trunk centers
+
+# Place radius-2 "tree kernel" around (tileX, tileY).
+# Uses the same neighbor set as the original circle with r=2:
+#   (±1,0), (±2,0), (0,±1), (0,±2), (±1,±1)
+macro placeTreeKernelRadius2(r tileX, r tileY) {
+  # We'll assume tileX,tileY are at least 2 tiles away from edges,
+  # enforced by scr_levelgen_init, so all +/-1, +/-2 neighbors are in-bounds.
+
+  # (tileX-1, tileY)
+  set kx, tileX;
+  addn kx, 255;       # -1
+  set ky, tileY;
+  setTileBranch kx, ky;
+
+  # (tileX+1, tileY)
+  set kx, tileX;
+  addn kx, 1;
+  set ky, tileY;
+  setTileBranch kx, ky;
+
+  # (tileX-2, tileY)
+  set kx, tileX;
+  addn kx, 254;       # -2
+  set ky, tileY;
+  setTileBranch kx, ky;
+
+  # (tileX+2, tileY)
+  set kx, tileX;
+  addn kx, 2;
+  set ky, tileY;
+  setTileBranch kx, ky;
+
+  # (tileX, tileY-1)
+  set kx, tileX;
+  set ky, tileY;
+  addn ky, 255;
+  setTileBranch kx, ky;
+
+  # (tileX, tileY+1)
+  set kx, tileX;
+  set ky, tileY;
+  addn ky, 1;
+  setTileBranch kx, ky;
+
+  # (tileX, tileY-2)
+  set kx, tileX;
+  set ky, tileY;
+  addn ky, 254;       # -2
+  setTileBranch kx, ky;
+
+  # (tileX, tileY+2)
+  set kx, tileX;
+  set ky, tileY;
+  addn ky, 2;
+  setTileBranch kx, ky;
+
+  # (tileX-1, tileY-1)
+  set kx, tileX;
+  addn kx, 255;
+  set ky, tileY;
+  addn ky, 255;
+  setTileBranch kx, ky;
+
+  # (tileX+1, tileY-1)
+  set kx, tileX;
+  addn kx, 1;
+  set ky, tileY;
+  addn ky, 255;
+  setTileBranch kx, ky;
+
+  # (tileX-1, tileY+1)
+  set kx, tileX;
+  addn kx, 255;
+  set ky, tileY;
+  addn ky, 1;
+  setTileBranch kx, ky;
+
+  # (tileX+1, tileY+1)
+  set kx, tileX;
+  addn kx, 1;
+  set ky, tileY;
+  addn ky, 1;
+  setTileBranch kx, ky;
+}
+
+# New scr_levelgen_init: bigger trees + acorns + enemies
+macro scr_levelgen_init() {
+  # Center in tile space for exclusions
+  setn centerX, 16;      # mapWidth / 2 for 32x32
+  setn centerY, 16;      # mapHeight / 2
+
+  # --- 1. Place trunks + radius-2 branch kernel ----------------------
+
+  setn i, 0;
+  setn limitTrees, levelGenTrees;
+
+tree_loop:
+  skipifeq i, limitTrees;
+  goto tree_body;
+  goto tree_done;
+
+tree_body:
+  randTileX tileX;
+  randTileY tileY;
+
+  # Avoid extreme edges so kernel is always in-bounds:
+  # skip if x in {0,1,30,31} or y in {0,1,30,31}
+  set tx, tileX;
+  setn zero, 0;
+  skipifeqn tx, zero;
+  goto not_x0;
+  goto next_tree;
+not_x0:
+  setn oneX, 1;
+  skipifeqn tx, oneX;
+  goto not_x1;
+  goto next_tree;
+not_x1:
+  setn thirty, 30;
+  skipifeqn tx, thirty;
+  goto not_x30;
+  goto next_tree;
+not_x30:
+  setn thirty1, 31;
+  skipifeqn tx, thirty1;
+  goto not_x31;
+  goto next_tree;
+not_x31:
+
+  set ty, tileY;
+  setn zeroY, 0;
+  skipifeqn ty, zeroY;
+  goto not_y0;
+  goto next_tree;
+not_y0:
+  setn oneY, 1;
+  skipifeqn ty, oneY;
+  goto not_y1;
+  goto next_tree;
+not_y1:
+  setn thirtyY, 30;
+  skipifeqn ty, thirtyY;
+  goto not_y30;
+  goto next_tree;
+not_y30:
+  setn thirty1Y, 31;
+  skipifeqn ty, thirty1Y;
+  goto not_y31;
+  goto next_tree;
+not_y31:
+
+  # Center exclusion region (here: just the exact center tile)
+  inCenterExcludeSimple tileX, tileY, 16, 16, excludedTree;
+  setn oneFlag, 1;
+  skipifeq excludedTree, oneFlag;
+  goto place_tree_here;
+  goto next_tree;
+
+place_tree_here:
+  # Trunk at center
+  setTileTrunk tileX, tileY;
+  # Surrounding branch "blob"
+  placeTreeKernelRadius2 tileX, tileY;
+
+next_tree:
+  addn i, 1;
+  goto tree_loop;
+
+tree_done:
+
+  # --- 2. Place acorns -----------------------------------------------
+
+  # Use the same center we just used for tree exclusion
+  spawnAcorns numNuts, 16, 16;
+
+  # --- 3. Place enemies ----------------------------------------------
+
+  # Example target counts: 8 rattlesnakes, then up to 16 total with eagles.
+  setn limR, 8;
+  spawnRattlesnakes limR, 16, 16;
+
+  setn limE, 16;       # total enemyCounter target after eagles
+  spawnEagles limE, 16, 16;
+}
+
+# Try to place one acorn at (mx,my), given center exclusion.
+macro trySpawnSingleNutAt(r mx, r my, int centerX, int centerY) {
+  # Exclude center region
+  inCenterExcludeSimple mx, my, centerX, centerY, excludedNut;
+  setn oneNut, 1;
+  skipifeq excludedNut, oneNut;
+  goto nut_not_excluded;
+  goto nut_try_done;
+
+nut_not_excluded:
+  # tileType = get_tile(mx, my)
+  tileGetType mx, my, tileType;
+
+  # Skip trunks (no acorns on trunks)
+  set tt, tileType;
+  setn tTrunk, tileTTrunk;
+  skipifeq tt, tTrunk;
+  goto nut_not_trunk;
+  goto nut_try_done;
+
+nut_not_trunk:
+  # Branch vs non-branch
+  setn tBranch, tileTBranch;
+  skipifeq tileType, tBranch;
+  goto nut_on_nonbranch;
+
+  # On branch tile: lower chance (roughly 1 in 64)
+  randomChance1in64 {
+    allocNutSlot nutIdx, nutOk;
+    setn okOneN, 1;
+    skipifeq nutOk, okOneN;
+    goto nut_branch_skip_store;
+
+    nutSetTileX nutIdx, mx;
+    nutSetTileY nutIdx, my;
+    setn flagsN, 0;
+    nutSetFlags nutIdx, flagsN;
+
+nut_branch_skip_store:
+  }
+  goto nut_try_done;
+
+nut_on_nonbranch:
+  # On non-branch tile: slightly higher chance (roughly 1 in 32)
+  randomChance1in32 {
+    allocNutSlot nutIdx2, nutOk2;
+    setn okOneN2, 1;
+    skipifeq nutOk2, okOneN2;
+    goto nut_nonbranch_skip_store;
+
+    nutSetTileX nutIdx2, mx;
+    nutSetTileY nutIdx2, my;
+    setn flagsN2, 0;
+    nutSetFlags nutIdx2, flagsN2;
+
+nut_nonbranch_skip_store:
+  }
+
+nut_try_done:
+}
+
+# Spawn acorns up to 'lim' (target nutCounter) around the map,
+# using branch/non-branch chances.
+macro spawnAcorns(int lim, int centerX, int centerY) {
+  setn targetNut, lim;
+
+  setn my, 0;
+nut_outer_my:
+  setn mx, 0;
+nut_outer_mx:
+
+    # Stop if nutCounter reached targetNut
+    getNutCounter curNut;
+    setn tmpNutLimit, targetNut;
+    skipifeq curNut, tmpNutLimit;
+    goto nut_do_cell;
+    goto spawnAcorns_done;
+
+nut_do_cell:
+    trySpawnSingleNutAt mx, my, centerX, centerY;
+
+    # Next x
+    addn mx, 1;
+    setn maxXNut, mapWidth;
+    skipifeq mx, maxXNut;
+    goto nut_outer_mx;
+
+  # Next y
+  addn my, 1;
+  setn maxYNut, mapHeight;
+  skipifeq my, maxYNut;
+  goto nut_outer_my;
+
+spawnAcorns_done:
+}
+
+# Try to spawn a rattlesnake at (mx,my) if:
+#   - not in center exclusion,
+#   - tileType == tileTAir,
+#   - random chance passes.
+macro trySpawnRattlesnakeAt(r mx, r my, int centerX, int centerY) {
+  inCenterExcludeSimple mx, my, centerX, centerY, excludedSnake;
+  setn oneS, 1;
+  skipifeq excludedSnake, oneS;
+  goto rs_not_excluded;
+  goto rs_try_done;
+
+rs_not_excluded:
+  tileGetType mx, my, tileTypeRS;
+
+  # Only on air tiles
+  set ttRS, tileTypeRS;
+  setn tAir, tileTAir;
+  skipifeq ttRS, tAir;
+  goto rs_try_done;
+
+  # randomEnemyChance ≈ 1.5%: we approximate with 1-in-64
+  randomChance1in64 {
+    allocEnemySlot eIdxRS, eOkRS;
+    setn okOneRS, 1;
+    skipifeq eOkRS, okOneRS;
+    goto rs_skip_store;
+
+    enemySetTileX eIdxRS, mx;
+    enemySetTileY eIdxRS, my;
+
+    setn zeroRS, 0;
+    enemySetDamageCounter eIdxRS, zeroRS;
+    enemySetMoveCounter eIdxRS, zeroRS;
+    enemySetCanDamage eIdxRS;
+
+rs_skip_store:
+  }
+
+rs_try_done:
+}
+
+# Spawn rattlesnakes until enemyCounter reaches 'lim'.
+macro spawnRattlesnakes(int lim, int centerX, int centerY) {
+  setn targetEnemiesRS, lim;
+
+rs_outer_while:
+  getEnemyCounter curErs;
+  setn limRS, targetEnemiesRS;
+  skipifeq curErs, limRS;
+  goto rs_do_sweep;
+  goto rs_done;
+
+rs_do_sweep:
+  setn myRS, 0;
+rs_my_loop:
+  setn mxRS, 0;
+rs_mx_loop:
+
+    # Re-check target each tile
+    getEnemyCounter curErs2;
+    setn limRS2, targetEnemiesRS;
+    skipifeq curErs2, limRS2;
+    goto rs_cell;
+    goto rs_done;
+
+rs_cell:
+    trySpawnRattlesnakeAt mxRS, myRS, centerX, centerY;
+
+    # Next x
+    addn mxRS, 1;
+    setn maxXRS, mapWidth;
+    skipifeq mxRS, maxXRS;
+    goto rs_mx_loop;
+
+  # Next y
+  addn myRS, 1;
+  setn maxYRS, mapHeight;
+  skipifeq myRS, maxYRS;
+  goto rs_my_loop;
+
+  # Another sweep if still below target
+  goto rs_outer_while;
+
+rs_done:
+}
+
+# Try to spawn an eagle at (mx,my) if:
+#   - not in center exclusion,
+#   - chance depends on branch vs non-branch.
+macro trySpawnEagleAt(r mx, r my, int centerX, int centerY) {
+  inCenterExcludeSimple mx, my, centerX, centerY, excludedE;
+  setn oneE, 1;
+  skipifeq excludedE, oneE;
+  goto re_not_excluded;
+  goto re_try_done;
+
+re_not_excluded:
+  tileGetType mx, my, tileTypeRE;
+
+  set ttRE, tileTypeRE;
+  setn tBranchRE, tileTBranch;
+  skipifeq ttRE, tBranchRE;
+  goto re_nonbranch;
+
+  # On branch tiles: branchEnemyChance ≈ 2% → use 1-in-32
+  randomChance1in32 {
+    allocEnemySlot eIdxRE, eOkRE;
+    setn okOneRE, 1;
+    skipifeq eOkRE, okOneRE;
+    goto re_branch_skip_store;
+
+    enemySetTileX eIdxRE, mx;
+    enemySetTileY eIdxRE, my;
+
+    setn zeroRE, 0;
+    enemySetDamageCounter eIdxRE, zeroRE;
+    enemySetMoveCounter eIdxRE, zeroRE;
+    enemySetCanDamage eIdxRE;
+
+re_branch_skip_store:
+  }
+  goto re_try_done;
+
+re_nonbranch:
+  # On non-branch tiles: randomEnemyChance ≈ 1% → use 1-in-64
+  randomChance1in64 {
+    allocEnemySlot eIdxREN, eOkREN;
+    setn okOneREN, 1;
+    skipifeq eOkREN, okOneREN;
+    goto re_nonbranch_skip_store;
+
+    enemySetTileX eIdxREN, mx;
+    enemySetTileY eIdxREN, my;
+
+    setn zeroREN, 0;
+    enemySetDamageCounter eIdxREN, zeroREN;
+    enemySetMoveCounter eIdxREN, zeroREN;
+    enemySetCanDamage eIdxREN;
+
+re_nonbranch_skip_store:
+  }
+
+re_try_done:
+}
+
+# Spawn eagles until enemyCounter reaches 'lim'.
+# Note: lim is the *total* enemyCounter target (after rattlesnakes).
+macro spawnEagles(int lim, int centerX, int centerY) {
+  setn targetEnemiesRE, lim;
+
+re_outer_while:
+  getEnemyCounter curEe;
+  setn limRE, targetEnemiesRE;
+  skipifeq curEe, limRE;
+  goto re_do_sweep;
+  goto re_done;
+
+re_do_sweep:
+  setn myRE, 0;
+re_my_loop:
+  setn mxRE, 0;
+re_mx_loop:
+
+    # Re-check target each tile
+    getEnemyCounter curEe2;
+    setn limRE2, targetEnemiesRE;
+    skipifeq curEe2, limRE2;
+    goto re_cell;
+    goto re_done;
+
+re_cell:
+    trySpawnEagleAt mxRE, myRE, centerX, centerY;
+
+    # Next x
+    addn mxRE, 1;
+    setn maxXRE, mapWidth;
+    skipifeq mxRE, maxXRE;
+    goto re_mx_loop;
+
+  # Next y
+  addn myRE, 1;
+  setn maxYRE, mapHeight;
+  skipifeq myRE, maxYRE;
+  goto re_my_loop;
+
+  # Another sweep if still below target
+  goto re_outer_while;
+
+re_done:
 }
 
 # --- Level gen ---
@@ -945,112 +1552,6 @@ scrLevelInit_enemy_body:
 
 scrLevelInit_enemy_done:
 }
-
-
-# ============================================================
-# scr_levelgen_init
-#   Simplified version of your GML:
-#   - Choose n random trunk positions
-#   - For each trunk, place plus-shaped branches around it
-#   (no acorns/enemies here; those can be added later)
-# ============================================================
-
-const levelGenTrees 20;   # n in the GML
-
-macro scr_levelgen_init() {
-  # centerX / centerY if you want to use them later
-  # (mapWidth / 2, mapHeight / 2) = (16,16) with 32x32 map
-  setn centerX, 16;
-  setn centerY, 16;
-
-  # kernelRadius = 1, implemented as a “plus” around the trunk
-
-  setn i, 0;
-  setn limit, levelGenTrees;
-
-scrLevelGen_tree_loop:
-  # if (i == limit) break;
-  skipifeq i, limit;
-  goto scrLevelGen_tree_body;
-  goto scrLevelGen_tree_done;
-
-scrLevelGen_tree_body:
-  # --- pick random tileX, tileY in [0..31] ---
-
-  randTileX tileX;
-  randTileY tileY;
-
-  # Optional: simple center exclusion box if you want
-  # (commented out; enable if needed)
-  #
-  # set cdx, tileX;
-  # set cdy, tileY;
-  #
-  # Here you could approximate a center exclusion region
-  # around (centerX, centerY) by checking equality against
-  # a small set of values, but omitted for now.
-
-  # --- place trunk at (tileX, tileY) ---
-  setTileTrunk tileX, tileY;
-
-  # --- plus-shaped branches around trunk ---
-
-  # UP: (tileY > 0) → (tileX, tileY-1)
-  set t, tileY;
-  skipifeqn t, 0;
-  goto scrLevelGen_no_up;
-  set bx, tileX;
-  set by, tileY;
-  addn by, 255;           # by = tileY - 1
-  setTileBranch bx, by;
-scrLevelGen_no_up:
-
-  # DOWN: (tileY < mapHeight-1 = 31) → (tileX, tileY+1)
-  set t, tileY;
-  skipifeqn t, 31;
-  goto scrLevelGen_do_down;
-  goto scrLevelGen_no_down;
-scrLevelGen_do_down:
-  set bx, tileX;
-  set by, tileY;
-  addn by, 1;             # by = tileY + 1
-  setTileBranch bx, by;
-scrLevelGen_no_down:
-
-  # LEFT: (tileX > 0) → (tileX-1, tileY)
-  set t, tileX;
-  skipifeqn t, 0;
-  goto scrLevelGen_no_left;
-  set bx, tileX;
-  set by, tileY;
-  addn bx, 255;           # bx = tileX - 1
-  setTileBranch bx, by;
-scrLevelGen_no_left:
-
-  # RIGHT: (tileX < mapWidth-1 = 31) → (tileX+1, tileY)
-  set t, tileX;
-  skipifeqn t, 31;
-  goto scrLevelGen_do_right;
-  goto scrLevelGen_no_right;
-scrLevelGen_do_right:
-  set bx, tileX;
-  set by, tileY;
-  addn bx, 1;             # bx = tileX + 1
-  setTileBranch bx, by;
-scrLevelGen_no_right:
-
-  # next tree
-  addn i, 1;
-  goto scrLevelGen_tree_loop;
-
-scrLevelGen_tree_done:
-  # At this point:
-  #   - tilemap has random tree clusters (trunk + branches)
-  # You can later add:
-  #   - acorn placement based on tile type
-  #   - enemy placement functions built on enemySlots/nutSlots
-}
-
 
 # --- Camera ---
 
