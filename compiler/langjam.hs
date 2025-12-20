@@ -545,6 +545,7 @@ chip8Instrs = Map.fromList
   , ("skipifeqn", (([RArg, IntArg], Just $ Set.fromList [1, 2]), MachineInstr 0x3000))
   , ("skipifneqn", (([RArg, IntArg], Just $ Set.fromList [1, 2]), MachineInstr 0x4000))
   , ("skipifeq", (([RArg, RArg], Just $ Set.fromList [1, 2]), MachineInstr 0x5000))
+  -- Based on: 6XNN	Const	Vx = NN	Sets VX to NN.
   , ("setn", (([WArg, IntArg], Nothing), MachineInstr 0x6000))
   , ("addn", (([RWArg, IntArg], Nothing), MachineInstr 0x7000))
   , ("set", (([WArg, RArg], Nothing), MachineInstr 0x8000))
@@ -557,6 +558,7 @@ chip8Instrs = Map.fromList
   , ("negsub", (([RWArg, RArg], Nothing), MachineInstr 0x8007))
   , ("shl", (([RWArg], Nothing), MachineInstr 0x800E)) -- TODO VF
   , ("skipifneq", (([RArg, RArg], Just $ Set.fromList [1, 2]), MachineInstr 0x9000))
+  -- Based on: ANNN	MEM	I = NNN	Sets I to the address NNN.
   , ("seti", (([IntArg], Nothing), MachineInstr 0xA000)) -- TODO I
   , ("rand", (([WArg, IntArg], Nothing), MachineInstr 0xC000))
   , ("draw", (([RArg, RArg, IntArg], Nothing), MachineInstr 0xD000)) -- TODO I
@@ -566,15 +568,23 @@ chip8Instrs = Map.fromList
   , ("getkey", (([WArg], Nothing), MachineInstr 0xF00A))
   , ("setdelay", (([RArg], Nothing), MachineInstr 0xF015))
   , ("setsound", (([RArg], Nothing), MachineInstr 0xF018))
+  -- Based on: FX1E	MEM	I += Vx	Adds VX to I. VF is not affected.
   , ("addi", (([RArg], Nothing), MachineInstr 0xF01E)) -- TODO I
   , ("setisprite", (([RArg], Nothing), MachineInstr 0xF029)) -- TODO I; TODO what is this
   , ("bcd", (([RArg], Nothing), MachineInstr 0xF033)) -- TODO I
   -- , ("regdump", ([RArg], Nothing, MachineInstr 0xF055)) -- TODO, this reads a bunch of regs
   -- , ("regload", ([WArg], Nothing, MachineInstr 0xF065)) -- TODO, this writes a bunch of regs
   -- workaround hacks (TODO):
+  -- Stores V0 to address I.
+  -- Based on: FX55	MEM	reg_dump(Vx, &I)	Stores from V0 to VX (including VX) in memory, starting at address I. The offset from I is increased by 1 for each value written, but I itself is left unmodified.
   , ("regdump", (([], Nothing), MachineInstr 0xF055))
+  -- Loads V0 from address I.
+  -- Based on: FX65	MEM	reg_load(Vx, &I)	Fills from V0 to VX (including VX) with values from memory, starting at address I. The offset from I is increased by 1 for each value read, but I itself is left unmodified.
   , ("regload", (([], Nothing), MachineInstr 0xF065))
+  -- Sets Vx to V0, where Vx is the virtual register given. Usage: `getzero vreg`
+  -- Based on: 8XY0	Assig	Vx = Vy	Sets VX to the value of VY.
   , ("getzero", (([WArg], Nothing), MachineInstr 0x8000))
+  -- Sets V0 to the given virtual register. Usage: `setzero vreg`
   , ("setzero", (([RArg], Nothing), FakeInstr (\[Left reg] -> renderMachineInstr (snd $ lookupOrDie "chip8 instructions" chip8Instrs "set") [Left V0, Left reg])))
   ]
 
