@@ -1,5 +1,95 @@
-region player 2
-const someConst 3
+# --- Constants and regions --- =========================================================
+
+# --- Map / tiles ---
+
+const mapWidth      32;
+const mapHeight     32;
+
+const tileTAir      0;
+const tileTBranch   1;
+const tileTTrunk    1;      # matches your GML
+
+# Counts / packing
+const tileCount     1024;   # 32 * 32
+const tilesPerByte  4;      # 2 bits per tile → 4 tiles per byte
+const tilemapBytes  256;    # tileCount / tilesPerByte
+
+# tile size in pixels
+const tileSize      8;
+
+# --- Entity counts ---
+
+const numEnemies    64;
+const numNuts       16;
+
+# single byte counters / frame counter
+region enemyCounter    1;
+region nutCounter      1;
+
+# --- Global state ---
+
+region frameCounter    1;
+
+# --- Tilemap ---
+
+# Packed tilemap: 4 tiles per byte, 2 bits each
+region tilemap tilemapBytes;
+
+# --- Nuts ---
+
+const nutSlotBytes   3;     # tileX, tileY, packed flags+dx+dy
+const nutSlotsBytes  48;    # numNuts * nutSlotBytes
+
+# Packed nut layout:
+#   byte 0: tileX (0..31)
+#   byte 1: tileY (0..31)
+#   byte 2: bits:
+#       0 = buried
+#       1 = thrown
+#       2 = high
+#       3-4 = dx code (0..3)
+#       5-6 = dy code (0..3)
+#       7   = unused
+
+# Offsets from the nut slot base
+const nutTileXOff    0
+const nutTileYOff    1
+const nutFlagsOff    2       # buried/thrown/high + dx/dy codes
+
+const nutFlagBuriedBit   0;
+const nutFlagThrownBit   1;
+const nutFlagHighBit     2;
+const nutDxShift         3;   # 2 bits, 3-4
+const nutDyShift         5;   # 2 bits, 5-6
+
+region nutSlots nutSlotsBytes;
+
+# --- Enemies ---
+
+const numEnemies        64;
+const enemySlotBytes    4;      # tileX, tileY, dmgFrameCounter, moveCounter+flag
+const enemySlotsBytes   256;    # numEnemies * enemySlotBytes
+
+# Packed enemy layout:
+#   byte 0: tileX (0..31)
+#   byte 1: tileY (0..31)
+#   byte 2: damagedPlayerFrameCounter (0..255)
+#   byte 3: bits:
+#       7   = canDamagePlayer
+#       0-6 = moveCounter (0..127)
+
+# Offsets from the enemy slot base
+const enemyTileXOff       0
+const enemyTileYOff       1
+const enemyDmgCounterOff  2
+const enemyMoveFlagsOff   3       # moveCounter + canDamagePlayer bit
+
+# Bit within the byte at enemyMoveFlagsOff
+const enemyCanDamageBit 7;      # in byte 3 of the slot
+
+region enemySlots enemySlotsBytes;
+
+# --- Code --- =========================================================
 
 macro setir(r memloc) {
   seti 0;

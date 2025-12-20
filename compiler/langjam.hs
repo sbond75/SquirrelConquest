@@ -17,7 +17,7 @@ import qualified Data.UUID as UUID
 import Control.DeepSeq (deepseq)
 import Control.Arrow (first, second)
 import Data.Foldable (fold)
-import Control.Monad (when)
+import Control.Monad (when, void)
 import Data.Word (Word16, Word8)
 import Data.Bits (shiftL, shiftR, (.|.))
 import Control.Monad.Writer (Writer, runWriter, tell)
@@ -25,6 +25,25 @@ import Numeric (showHex)
 import qualified Data.ByteString as BS
 import Data.List (mapAccumL)
 import Control.Exception (assert)
+import qualified Data.Text.IO as TIO
+import System.Environment (getArgs)
+import System.Exit (die)
+import GHC.Stack (HasCallStack, prettyCallStack, callStack)
+
+lookupOrDie
+    :: (Ord k, Show k, HasCallStack)
+    => String          -- ^ description of the map (for debugging)
+    -> Map.Map k v
+    -> k
+    -> v
+lookupOrDie what m k =
+    case Map.lookup k m of
+        Just v ->
+            v
+        Nothing ->
+            error $
+                "lookupOrDie: missing key in " ++ what ++ ": " ++ show k ++ "\n"
+                ++ prettyCallStack callStack
 
 type Parser = Parsec Void T.Text
 
@@ -110,11 +129,17 @@ word16 = read <$> some digitChar
 intParser :: Parser Int
 intParser = read <$> some digitChar
 
+symbol :: T.Text -> Parser T.Text
+symbol = Lexer.symbol spaceConsumer
+
+semi :: Parser ()
+semi = void (symbol ";")
+
 regionDecl :: Parser RegionDecl
-regionDecl = string "region" >> space1 >> (RegionDecl <$> lexeme identifier <*> (Region <$> lexeme word16))
+regionDecl = string "region" >> space1 >> (RegionDecl <$> lexeme identifier <*> (Region <$> lexeme word16)) <* optional semi
 
 constDecl :: Parser ConstDecl
-constDecl = string "const" >> space1 >> (ConstDecl <$> lexeme identifier <*> (Const <$> lexeme intParser))
+constDecl = string "const" >> space1 >> (ConstDecl <$> lexeme identifier <*> (Const <$> lexeme intParser)) <* optional semi
 
 decl :: Parser Decl
 decl =
@@ -239,7 +264,7 @@ inlineMacro excl env args macro = inlineMacroExceptMacroArgs excl args macro >>=
 inlineMacroFromCodeMap :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Map.Map String Macro -> String -> [Expr] -> m [Line]
 inlineMacroFromCodeMap builtins excl macroDecls = f where
   f s a | s `Set.member` builtins = pure [InstrLine (Instr s a)]
-  f s a = inlineMacro excl f a (macroDecls Map.! s) >>= replaceLines f -- TODO is that `>>= replaceLines f` even necessary?
+  f s a = inlineMacro excl f a (lookupOrDie "macro declarations" macroDecls s) >>= replaceLines f -- TODO is that `>>= replaceLines f` even necessary?
 
 inlineMacroFromCode :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Code -> String -> [Expr] -> m [Line]
 inlineMacroFromCode builtins excl code = inlineMacroFromCodeMap builtins excl macroDecls where
@@ -297,7 +322,7 @@ computeTargets :: Map.Map String ([ArgType], Maybe (Set.Set Int)) -> [Line] -> M
 computeTargets instrTypes l = toIntMap $ helper <$> (zip [0..] instrs) where
   toIntMap = Map.fromList . zip [0..]
   (instrs, lbls) = splitLines l
-  helper (lineNum, Instr{..}) = let (argTypes, inherent) = instrTypes Map.! instrName in Set.union (Set.fromList $ catMaybes $ fmap labelArg $ zip argTypes instrArgs) (Set.map (lineNum +) $ fromMaybe (Set.singleton 1) inherent)
+  helper (lineNum, Instr{..}) = let (argTypes, inherent) = lookupOrDie "instruction types" instrTypes instrName in Set.union (Set.fromList $ catMaybes $ fmap labelArg $ zip argTypes instrArgs) (Set.map (lineNum +) $ fromMaybe (Set.singleton 1) inherent)
   labelArg (LabelArg, VarExpr v) = Map.lookup v lbls
   labelArg _ = Nothing
 
@@ -371,9 +396,9 @@ assembleLine regAllocs labels labelToAddr regionAddr consts (Instr {..}) =
         -- Label: convert from instruction index to RAM address
         (_, Just n, _, _)   -> Right (labelToAddr n)
         -- Region: find an assigned address
-        (_, _, Just r, _)   -> Right (regionAddr Map.! v)
+        (_, _, Just r, _)   -> Right (lookupOrDie "region addresses" regionAddr v)
         -- Const: find a constant value
-        (_, _, _, Just c)   -> Right (constValue $ consts Map.! v)
+        (_, _, _, Just c)   -> Right (constValue $ lookupOrDie "constants" consts v)
         -- Should not happen if your macros are well-formed
         _             -> error ("Unknown variable/label: " ++ v)
 
@@ -427,7 +452,7 @@ renderMachineInstr (MachineInstr{..}) = foldl (.|.) baseBytes . fmap processArg 
 
 renderMachineInstrs :: Map.Map String MachineInstr -> [(String, [Either HardwareRegister Int])] -> [Word16]
 renderMachineInstrs instrs = fmap helper where
-  helper (name, args) = renderMachineInstr (instrs Map.! name) args
+  helper (name, args) = renderMachineInstr (lookupOrDie "instructions" instrs name) args
 
 chip8Instrs :: Map.Map String (([ArgType], Maybe (Set.Set Int)), MachineInstr)
 chip8Instrs = Map.fromList
@@ -466,7 +491,7 @@ chip8Instrs = Map.fromList
   , ("regdump", (([], Nothing), MachineInstr 0xF055))
   , ("regload", (([], Nothing), MachineInstr 0xF065))
   , ("getzero", (([WArg], Nothing), MachineInstr 0x8000))
-  , ("setzero", (([RArg], Nothing), FakeInstr (\[Left reg] -> renderMachineInstr (snd $ chip8Instrs Map.! "set") [Left V0, Left reg])))
+  , ("setzero", (([RArg], Nothing), FakeInstr (\[Left reg] -> renderMachineInstr (snd $ lookupOrDie "chip8 instructions" chip8Instrs "set") [Left V0, Left reg])))
   ]
 
 chip8Types :: Map.Map String ArgType
@@ -483,10 +508,25 @@ getCodeMacroTypes c = Map.fromList [(declMacroName, MacroValArg $ fmap macroArgT
 
 main :: IO ()
 main = do
-  putStrLn "enter program then ctrl D:"
-  userCode <- getContents
-  userCode `deepseq` pure ()
-  let parsedCode = either (error . errorBundlePretty) id $ parse code "" $ T.pack userCode
+  args <- getArgs
+
+  (srcName, userCodeText) <-
+      case args of
+          [] ->
+              do
+                  putStrLn "enter program then ctrl D:"
+                  t <- TIO.getContents
+                  t `deepseq` pure ()
+                  pure ("<stdin>", t)
+          [fp] ->
+              do
+                  t <- TIO.readFile fp
+                  t `deepseq` pure ()
+                  pure (fp, t)
+          _ ->
+              die "usage: langjam [program-file]"
+
+  let parsedCode = either (error . errorBundlePretty) id $ parse code srcName userCodeText
   let codeMacroTypes = getCodeMacroTypes parsedCode
   let regions = Set.fromList [declRegionName d | DeclRegion d <- codeDecls parsedCode]
   let regionsTypes = Map.fromList $ zip (Set.toList regions) (repeat IntArg)
