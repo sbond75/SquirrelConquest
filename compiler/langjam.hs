@@ -193,9 +193,9 @@ constDecl =
 
 decl :: Parser Decl
 decl =
-  try macro <|> region <|> const
+  macro <|> region <|> const
   where
-    macro = fixupMacroDeclCaptureVars <$> (lexeme (string "macro" >> space1) >> ((\a b c -> DeclMacro a (Macro b [] c)) <$> lexeme identifier <*> args <*> macroLines))
+    macro = fixupMacroDeclCaptureVars <$> (lexeme (string "macro" >> space1) >> ((\a b c -> DeclMacro a (Macro b [] c)) <$> lexeme identifier <*> args <*> macroLines)) <* optional semi
     region = DeclRegion <$> regionDecl
     const = DeclConst <$> constDecl
 
@@ -206,7 +206,7 @@ macroExprWithArgs :: Parser Expr
 macroExprWithArgs = (\a b -> MacroExpr $ Macro a [] b) <$> args <*> macroLines
 
 code :: Parser Code
-code = spaceConsumer *> (Code <$> many decl)
+code = spaceConsumer *> (Code <$> many decl) <* eof
 
 class VarGen m where
   genVar :: String -> m String

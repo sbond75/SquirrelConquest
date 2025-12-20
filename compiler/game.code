@@ -1076,102 +1076,6 @@ macro placeTreeKernelRadius2(r tileX, r tileY) {
   setTileBranch kx, ky;
 }
 
-# Try to place one acorn at (mx,my), given center exclusion.
-macro trySpawnSingleNutAt(r mx, r my, int centerX, int centerY) {
-  # Exclude center region
-  inCenterExcludeSimple mx, my, centerX, centerY, excludedNut;
-  setn oneNut, 1;
-  skipifeq excludedNut, oneNut;
-  goto nut_not_excluded;
-  goto nut_try_done;
-
-nut_not_excluded:
-  # tileType = get_tile(mx, my)
-  tileGetType mx, my, tileType;
-
-  # Skip trunks (no acorns on trunks)
-  set tt, tileType;
-  setn tTrunk, tileTTrunk;
-  skipifeq tt, tTrunk;
-  goto nut_not_trunk;
-  goto nut_try_done;
-
-nut_not_trunk:
-  # Branch vs non-branch
-  setn tBranch, tileTBranch;
-  skipifeq tileType, tBranch;
-  goto nut_on_nonbranch;
-
-  # On branch tile: lower chance (roughly 1 in 64)
-  randomChance1in64 {
-    allocNutSlot nutIdx, nutOk;
-    setn okOneN, 1;
-    skipifeq nutOk, okOneN;
-    goto nut_branch_skip_store;
-
-    nutSetTileX nutIdx, mx;
-    nutSetTileY nutIdx, my;
-    setn flagsN, 0;
-    nutSetFlags nutIdx, flagsN;
-
-nut_branch_skip_store:
-  }
-  goto nut_try_done;
-
-nut_on_nonbranch:
-  # On non-branch tile: slightly higher chance (roughly 1 in 32)
-  randomChance1in32 {
-    allocNutSlot nutIdx2, nutOk2;
-    setn okOneN2, 1;
-    skipifeq nutOk2, okOneN2;
-    goto nut_nonbranch_skip_store;
-
-    nutSetTileX nutIdx2, mx;
-    nutSetTileY nutIdx2, my;
-    setn flagsN2, 0;
-    nutSetFlags nutIdx2, flagsN2;
-
-nut_nonbranch_skip_store:
-  }
-
-nut_try_done:
-}
-
-# Spawn acorns up to 'lim' (target nutCounter) around the map,
-# using branch/non-branch chances.
-macro spawnAcorns(int lim, int centerX, int centerY) {
-  setn targetNut, lim;
-
-  setn my, 0;
-nut_outer_my:
-  setn mx, 0;
-nut_outer_mx:
-
-    # Stop if nutCounter reached targetNut
-    getNutCounter curNut;
-    set tmpNutLimit, targetNut;
-    skipifeq curNut, tmpNutLimit;
-    goto nut_do_cell;
-    goto spawnAcorns_done;
-
-nut_do_cell:
-    trySpawnSingleNutAt mx, my, centerX, centerY;
-
-    # Next x
-    addn mx, 1;
-    setn maxXNut, mapWidth;
-    skipifeq mx, maxXNut;
-    goto nut_outer_mx;
-
-  # Next y
-  addn my, 1;
-  setn maxYNut, mapHeight;
-  skipifeq my, maxYNut;
-  goto nut_outer_my;
-
-spawnAcorns_done:
-}
-
 # New scr_levelgen_init: bigger trees + acorns + enemies
 macro scr_levelgen_init() {
   # Center in tile space for exclusions
@@ -1272,6 +1176,102 @@ tree_done:
   spawnEagles limE, 16, 16;
 }
 
+# Try to place one acorn at (mx,my), given center exclusion.
+macro trySpawnSingleNutAt(r mx, r my, int centerX, int centerY) {
+  # Exclude center region
+  inCenterExcludeSimple mx, my, centerX, centerY, excludedNut;
+  setn oneNut, 1;
+  skipifeq excludedNut, oneNut;
+  goto nut_not_excluded;
+  goto nut_try_done;
+
+nut_not_excluded:
+  # tileType = get_tile(mx, my)
+  tileGetType mx, my, tileType;
+
+  # Skip trunks (no acorns on trunks)
+  set tt, tileType;
+  setn tTrunk, tileTTrunk;
+  skipifeq tt, tTrunk;
+  goto nut_not_trunk;
+  goto nut_try_done;
+
+nut_not_trunk:
+  # Branch vs non-branch
+  setn tBranch, tileTBranch;
+  skipifeq tileType, tBranch;
+  goto nut_on_nonbranch;
+
+  # On branch tile: lower chance (roughly 1 in 64)
+  randomChance1in64 {
+    allocNutSlot nutIdx, nutOk;
+    setn okOneN, 1;
+    skipifeq nutOk, okOneN;
+    goto nut_branch_skip_store;
+
+    nutSetTileX nutIdx, mx;
+    nutSetTileY nutIdx, my;
+    setn flagsN, 0;
+    nutSetFlags nutIdx, flagsN;
+
+nut_branch_skip_store:
+  };
+  goto nut_try_done;
+
+nut_on_nonbranch:
+  # On non-branch tile: slightly higher chance (roughly 1 in 32)
+  randomChance1in32 {
+    allocNutSlot nutIdx2, nutOk2;
+    setn okOneN2, 1;
+    skipifeq nutOk2, okOneN2;
+    goto nut_nonbranch_skip_store;
+
+    nutSetTileX nutIdx2, mx;
+    nutSetTileY nutIdx2, my;
+    setn flagsN2, 0;
+    nutSetFlags nutIdx2, flagsN2;
+
+nut_nonbranch_skip_store:
+  };
+
+nut_try_done:
+}
+
+# Spawn acorns up to 'lim' (target nutCounter) around the map,
+# using branch/non-branch chances.
+macro spawnAcorns(int lim, int centerX, int centerY) {
+  setn targetNut, lim;
+
+  setn my, 0;
+nut_outer_my:
+  setn mx, 0;
+nut_outer_mx:
+
+    # Stop if nutCounter reached targetNut
+    getNutCounter curNut;
+    setn tmpNutLimit, targetNut;
+    skipifeq curNut, tmpNutLimit;
+    goto nut_do_cell;
+    goto spawnAcorns_done;
+
+nut_do_cell:
+    trySpawnSingleNutAt mx, my, centerX, centerY;
+
+    # Next x
+    addn mx, 1;
+    setn maxXNut, mapWidth;
+    skipifeq mx, maxXNut;
+    goto nut_outer_mx;
+
+  # Next y
+  addn my, 1;
+  setn maxYNut, mapHeight;
+  skipifeq my, maxYNut;
+  goto nut_outer_my;
+
+spawnAcorns_done:
+}
+
 # Try to spawn a rattlesnake at (mx,my) if:
 #   - not in center exclusion,
 #   - tileType == tileTAir,
@@ -1308,7 +1308,7 @@ rs_not_excluded:
     enemySetCanDamage eIdxRS;
 
 rs_skip_store:
-  }
+  };
 
 rs_try_done:
 }
@@ -1392,7 +1392,7 @@ re_not_excluded:
     enemySetCanDamage eIdxRE;
 
 re_branch_skip_store:
-  }
+  };
   goto re_try_done;
 
 re_nonbranch:
@@ -1412,7 +1412,7 @@ re_nonbranch:
     enemySetCanDamage eIdxREN;
 
 re_nonbranch_skip_store:
-  }
+  };
 
 re_try_done:
 }
