@@ -18,7 +18,7 @@ import Control.DeepSeq (deepseq)
 import Control.Arrow (first, second)
 import Data.Foldable (fold)
 import Control.Monad (when, void)
-import Data.Word (Word16, Word8)
+import Data.Word (Word32, Word8)
 import Data.Bits (shiftL, shiftR, (.|.))
 import Control.Monad.Writer (Writer, runWriter, tell)
 import Numeric (showHex)
@@ -56,7 +56,7 @@ data ArgType = RArg | WArg | RWArg | IntArg | LabelArg | MacroValArg {-TODO clun
 data MacroArg = MacroArg { macroArgType :: ArgType, macroArgName :: String } deriving (Show)
 
 data Macro = Macro { macroArgs :: [MacroArg], macroCaptured :: [String], macroBody :: [Line] } deriving (Show)
-data Region = Region { regionSize :: Word16, regionInit :: [Int] } deriving (Show)
+data Region = Region { regionSize :: Word32, regionInit :: [Int] } deriving (Show)
 data RegionDecl = RegionDecl { declRegionName :: String, declRegionRegion :: Region } deriving (Show)
 data Const = Const { constValue :: Int } deriving (Show)
 data ConstDecl = ConstDecl { declConstName :: String, declConstConst :: Const } deriving (Show)
@@ -141,9 +141,6 @@ args = lexeme (char '(') >> sepBy (lexeme macroArg) (lexeme $ char ',') <* lexem
 -- TODO clunky naming, should be macroBody btu thats taken
 macroLines :: Parser [Line]
 macroLines = lexeme (char '{') >> many (lexeme line) <* lexeme (char '}')
-
-word16 :: Parser Word16
-word16 = read <$> some digitChar
 
 intParser :: Parser Int
 intParser = read <$> some digitChar
@@ -523,20 +520,26 @@ subtype RWArg WArg = True
 subtype (MacroValArg a) (MacroValArg b) = length a == length b && all (uncurry subtype) (zip b a) -- order switch is intentional
 subtype x y = x == y
 
-data MachineInstr = MachineInstr { baseBytes :: Word16 } | FakeInstr ([Either HardwareRegister Int] -> Word16)
+data MachineInstr = MachineInstr { baseBytes :: Word32 } | FakeInstr (Mode -> [Either HardwareRegister Int] -> Word32)
 
-renderMachineInstr :: MachineInstr -> [Either HardwareRegister Int] -> Word16
-renderMachineInstr (FakeInstr f) = f
-renderMachineInstr (MachineInstr{..}) = foldl (.|.) baseBytes . fmap processArg . zip [0..] where
+renderMachineInstr :: MachineInstr -> Mode -> [Either HardwareRegister Int] -> Word32
+renderMachineInstr (FakeInstr f) m = f m
+renderMachineInstr (MachineInstr{..}) Vanilla = foldl (.|.) baseBytes . fmap processArg . zip [0..] where
   -- each increment of argNum we shift 4 less
   -- we start at position 2 ie <<8
   processArg (argNum, Left v) = shiftL (fromIntegral $ fromEnum v) (8 - 4*argNum)
   -- number values are all the way to the right, so we don't need to worry about shifting them; additional space changes their max value, not their shift amt
   processArg (_, Right n) = fromIntegral n
+renderMachineInstr (MachineInstr{..}) Chip83 = foldl (.|.) (shiftL baseBytes 8) . fmap processArg . zip [0..] where
+  -- each increment of argNum we shift 4 less
+  -- we start at position 2 ie <<8
+  processArg (argNum, Left v) = shiftL (fromIntegral $ fromEnum v) (12 - 4*argNum)
+  -- number values are all the way to the right, so we don't need to worry about shifting them; additional space changes their max value, not their shift amt
+  processArg (_, Right n) = fromIntegral n
 
-renderMachineInstrs :: Map.Map String MachineInstr -> [(String, [Either HardwareRegister Int])] -> [Word16]
-renderMachineInstrs instrs = fmap helper where
-  helper (name, args) = renderMachineInstr (lookupOrDie "instructions" instrs name) args
+renderMachineInstrs :: Map.Map String MachineInstr -> Mode -> [(String, [Either HardwareRegister Int])] -> [Word32]
+renderMachineInstrs instrs m = fmap helper where
+  helper (name, args) = renderMachineInstr (lookupOrDie "instructions" instrs name) m args
 
 chip8Instrs :: Map.Map String (([ArgType], Maybe (Set.Set Int)), MachineInstr)
 chip8Instrs = Map.fromList
@@ -585,17 +588,20 @@ chip8Instrs = Map.fromList
   -- Based on: 8XY0	Assig	Vx = Vy	Sets VX to the value of VY.
   , ("getzero", (([WArg], Nothing), MachineInstr 0x8000))
   -- Sets V0 to the given virtual register. Usage: `setzero vreg`
-  , ("setzero", (([RArg], Nothing), FakeInstr (\[Left reg] -> renderMachineInstr (snd $ lookupOrDie "chip8 instructions" chip8Instrs "set") [Left V0, Left reg])))
+  , ("setzero", (([RArg], Nothing), FakeInstr (\m [Left reg] -> renderMachineInstr (snd $ lookupOrDie "chip8 instructions" chip8Instrs "set") m [Left V0, Left reg])))
   ]
 
 chip8Types :: Map.Map String ArgType
 chip8Types = (MacroValArg . fst . fst) <$> chip8Instrs
 
-w16to8 :: Word16 -> (Word8, Word8)
-w16to8 w = (fromIntegral $ shiftR w 8, fromIntegral w)
+w32to8 :: Mode -> Word32 -> [Word8]
+w32to8 Vanilla w = [fromIntegral $ shiftR w 8, fromIntegral w]
+w32to8 Chip83 w = [fromIntegral $ shiftR w 12, fromIntegral $ shiftR w 8, fromIntegral w]
 
-w16to8s :: [Word16] -> [Word8]
-w16to8s = concatMap ((\(a,b) -> [a,b]) . w16to8)
+w32to8s :: Mode -> [Word32] -> [Word8]
+w32to8s m = concatMap (w32to8 m)
+
+data Mode = Vanilla | Chip83
 
 getCodeMacroTypes :: Code -> Map.Map String ArgType
 getCodeMacroTypes c = Map.fromList [(declMacroName, MacroValArg $ fmap macroArgType $ macroArgs $ declMacroMacro) | DeclMacro {..} <- codeDecls c]
@@ -685,7 +691,7 @@ main = do
   putStrLn "total instruction count:"
   print $ totalInstrCount
   putStrLn "machine:"
-  let machine = w16to8s $ renderMachineInstrs (snd <$> chip8Instrs) $ runAssemblerBase $ assembly
+  let machine = w32to8s Chip83 $ renderMachineInstrs (snd <$> chip8Instrs) Chip83 $ runAssemblerBase $ assembly
   let machineLen = length machine
   print $ fmap (flip showHex "") $ machine
   putStrLn "length of machine code (bytes):"
