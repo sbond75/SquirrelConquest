@@ -11,6 +11,24 @@ region spr_player auto 0b00000111
 	             , 0b00111000
 	             , 0b00111110
 
+region spr_branch auto 0b11100001
+	             , 0b00100011
+	             , 0b01110010
+	             , 0b01011010
+	             , 0b01001000
+	             , 0b00001000
+	             , 0b10001101
+	             , 0b10000001
+
+region spr_trunk auto  0b00100000
+	             , 0b00101000
+	             , 0b00111100
+	             , 0b01111100
+	             , 0b01111111
+	             , 0b11111100
+	             , 0b00100010
+	             , 0b01000001
+
 # --- Map / tiles ---
 
 const mapWidth      32;
@@ -18,7 +36,7 @@ const mapHeight     32;
 
 const tileTAir      0;
 const tileTBranch   1;
-const tileTTrunk    1;      # matches your GML
+const tileTTrunk    2;
 
 # Counts / packing
 const tileCount     1024;   # 32 * 32
@@ -75,6 +93,136 @@ const nutDyShift         5;   # 2 bits, 5-6
 
 region nutSlots 48; #nutSlotsBytes;
 
+# --- Nut helpers ---
+
+/* Compute byte offset of nut slot `idx`:
+   off = idx * nutSlotBytes (3)
+*/
+macro nutSlotOffset(r idx, w off) {
+  set off, idx;
+  add off, idx;     # off = 2*idx
+  add off, idx;     # off = 3*idx
+}
+
+/* Load a single byte from nutSlots[idx] at field offset `fieldOff` */
+macro nutLoadByte(r idx, int fieldOff, w out) {
+  nutSlotOffset idx, off;
+  addn off, fieldOff;
+  seti nutSlots;
+  addi off;
+  regload;
+  getzero out;
+}
+
+/* Store a single byte into nutSlots[idx] at field offset `fieldOff` */
+macro nutStoreByte(r idx, int fieldOff, r val) {
+  nutSlotOffset idx, off;
+  addn off, fieldOff;
+  seti nutSlots;
+  addi off;
+  setzero val;
+  regdump;
+}
+
+macro nutGetTileX(r idx, w outX) {
+  nutLoadByte idx, nutTileXOff, outX;
+}
+
+macro nutSetTileX(r idx, r inX) {
+  nutStoreByte idx, nutTileXOff, inX;
+}
+
+macro nutGetTileY(r idx, w outY) {
+  nutLoadByte idx, nutTileYOff, outY;
+}
+
+macro nutSetTileY(r idx, r inY) {
+  nutStoreByte idx, nutTileYOff, inY;
+}
+
+macro nutGetFlags(r idx, w flags) {
+  nutLoadByte idx, nutFlagsOff, flags;
+}
+
+macro nutSetFlags(r idx, r flags) {
+  nutStoreByte idx, nutFlagsOff, flags;
+}
+
+# --- Buried flag (bit 0) ---
+
+macro nutSetBuried(r idx) {
+  nutGetFlags idx, flags;
+  setn mask, 1;           # 1 << 0
+  bor flags, mask;
+  nutSetFlags idx, flags;
+}
+
+macro nutClearBuried(r idx) {
+  nutGetFlags idx, flags;
+  setn mask, 1;           # 1 << 0
+  setn full, 255;
+  bxor full, mask;        # full = ~mask
+  band flags, full;
+  nutSetFlags idx, flags;
+}
+
+macro nutGetBuried(r idx, w out) {
+  nutGetFlags idx, flags;
+  setn mask, 1;
+  band flags, mask;
+  set out, flags;         # out = 0 or 1
+}
+
+# --- Thrown flag (bit 1) ---
+
+macro nutSetThrown(r idx) {
+  nutGetFlags idx, flags;
+  setn mask, 2;           # 1 << 1
+  bor flags, mask;
+  nutSetFlags idx, flags;
+}
+
+macro nutClearThrown(r idx) {
+  nutGetFlags idx, flags;
+  setn mask, 2;
+  setn full, 255;
+  bxor full, mask;        # full = ~mask
+  band flags, full;
+  nutSetFlags idx, flags;
+}
+
+macro nutGetThrown(r idx, w out) {
+  nutGetFlags idx, flags;
+  setn mask, 2;
+  band flags, mask;
+  set out, flags;         # 0 or 2
+}
+
+# --- High flag (bit 2) ---
+
+macro nutSetHigh(r idx) {
+  nutGetFlags idx, flags;
+  setn mask, 4;           # 1 << 2
+  bor flags, mask;
+  nutSetFlags idx, flags;
+}
+
+macro nutClearHigh(r idx) {
+  nutGetFlags idx, flags;
+  setn mask, 4;
+  setn full, 255;
+  bxor full, mask;        # full = ~mask
+  band flags, full;
+  nutSetFlags idx, flags;
+}
+
+macro nutGetHigh(r idx, w out) {
+  nutGetFlags idx, flags;
+  setn mask, 4;
+  band flags, mask;
+  set out, flags;         # 0 or 4
+}
+
 # --- Enemies ---
 
 const numEnemies        64;
@@ -99,6 +247,580 @@ const enemyMoveFlagsOff   3       # moveCounter + canDamagePlayer bit
 const enemyCanDamageBit 7;      # in byte 3 of the slot
 
 region enemySlots 256; #enemySlotsBytes;
+
+# --- Enemy helpers ---
+
+/* Compute byte offset of enemy slot `idx`:
+   off = idx * enemySlotBytes (4)
+*/
+macro enemySlotOffset(r idx, w off) {
+  set off, idx;
+  shl off;          # *2
+  shl off;          # *4
+}
+
+/* Load a single byte from enemySlots[idx] at field offset `fieldOff` */
+macro enemyLoadByte(r idx, int fieldOff, w out) {
+  enemySlotOffset idx, off;
+  addn off, fieldOff;
+  seti enemySlots;
+  addi off;
+  regload;
+  getzero out;
+}
+
+/* Store a single byte into enemySlots[idx] at field offset `fieldOff` */
+macro enemyStoreByte(r idx, int fieldOff, r val) {
+  enemySlotOffset idx, off;
+  addn off, fieldOff;
+  seti enemySlots;
+  addi off;
+  setzero val;
+  regdump;
+}
+
+macro enemyGetTileX(r idx, w outX) {
+  enemyLoadByte idx, enemyTileXOff, outX;
+}
+
+macro enemySetTileX(r idx, r inX) {
+  enemyStoreByte idx, enemyTileXOff, inX;
+}
+
+macro enemyGetTileY(r idx, w outY) {
+  enemyLoadByte idx, enemyTileYOff, outY;
+}
+
+macro enemySetTileY(r idx, r inY) {
+  enemyStoreByte idx, enemyTileYOff, inY;
+}
+
+macro enemyGetDamageCounter(r idx, w out) {
+  enemyLoadByte idx, enemyDmgCounterOff, out;
+}
+
+macro enemySetDamageCounter(r idx, r val) {
+  enemyStoreByte idx, enemyDmgCounterOff, val;
+}
+
+macro enemyGetMoveCounter(r idx, w out) {
+  enemyLoadByte idx, enemyMoveFlagsOff, b;
+  setn mask, 127;        # 0x7F
+  band b, mask;          # keep low 7 bits
+  set out, b;
+}
+
+/* move is treated as 0..127; high bit is preserved */
+macro enemySetMoveCounter(r idx, r move) {
+  enemyLoadByte idx, enemyMoveFlagsOff, b;
+
+  # newByte = (old & 0x80) | (move & 0x7F)
+  set newByte, b;
+  setn maskHi, 128;      # 0x80
+  band newByte, maskHi;  # keep only canDamage bit
+
+  set val, move;
+  setn maskLo, 127;      # 0x7F
+  band val, maskLo;      # clamp low 7 bits
+
+  bor newByte, val;
+
+  enemyStoreByte idx, enemyMoveFlagsOff, newByte;
+}
+
+/* out = 0 or 0x80 (nonzero means can damage) */
+macro enemyGetCanDamage(r idx, w out) {
+  enemyLoadByte idx, enemyMoveFlagsOff, b;
+  setn mask, 128;        # 1 << 7
+  band b, mask;
+  set out, b;
+}
+
+macro enemySetCanDamage(r idx) {
+  enemyLoadByte idx, enemyMoveFlagsOff, b;
+  setn mask, 128;        # set bit 7
+  bor b, mask;
+  enemyStoreByte idx, enemyMoveFlagsOff, b;
+}
+
+macro enemyClearCanDamage(r idx) {
+  enemyLoadByte idx, enemyMoveFlagsOff, b;
+  setn mask, 128;
+  setn full, 255;
+  bxor full, mask;       # full = ~mask = 0x7F
+  band b, full;          # clear bit 7
+  enemyStoreByte idx, enemyMoveFlagsOff, b;
+}
+
+# --- Player struct layout ---
+
+const playerSlotBytes           6
+
+const playerTileXOff            0
+const playerTileYOff            1
+const playerFlagsOff            2
+const playerHpOff               3
+const playerStateFramesOff      4
+const playerScoreOff            5
+
+# flags in playerFlagsOff:
+const playerOnBranchBit         0   # bit 0
+const playerHasAcornBit         1   # bit 1
+const playerEatingBit           2   # bit 2
+
+region player 6; #playerSlotBytes;
+
+# --- Player helpers ---
+
+# Load player[fieldOff] -> out
+macro playerLoadByte(int fieldOff, w out) {
+  setn off, fieldOff;
+  seti player;
+  addi off;
+  regload;
+  getzero out;
+}
+
+# Store val -> player[fieldOff]
+macro playerStoreByte(int fieldOff, r val) {
+  setn off, fieldOff;
+  seti player;
+  addi off;
+  setzero val;
+  regdump;
+}
+
+macro playerGetTileX(w outX) {
+  playerLoadByte playerTileXOff, outX;
+}
+
+macro playerSetTileX(r inX) {
+  playerStoreByte playerTileXOff, inX;
+}
+
+macro playerGetTileY(w outY) {
+  playerLoadByte playerTileYOff, outY;
+}
+
+macro playerSetTileY(r inY) {
+  playerStoreByte playerTileYOff, inY;
+}
+
+macro playerGetHp(w outHp) {
+  playerLoadByte playerHpOff, outHp;
+}
+
+macro playerSetHp(r inHp) {
+  playerStoreByte playerHpOff, inHp;
+}
+
+macro playerGetStateFrames(w outFrames) {
+  playerLoadByte playerStateFramesOff, outFrames;
+}
+
+macro playerSetStateFrames(r inFrames) {
+  playerStoreByte playerStateFramesOff, inFrames;
+}
+
+macro playerGetScore(w outScore) {
+  playerLoadByte playerScoreOff, outScore;
+}
+
+macro playerSetScore(r inScore) {
+  playerStoreByte playerScoreOff, inScore;
+}
+
+# Internal: load/store flags byte
+
+macro playerGetFlags(w outFlags) {
+  playerLoadByte playerFlagsOff, outFlags;
+}
+
+macro playerSetFlags(r inFlags) {
+  playerStoreByte playerFlagsOff, inFlags;
+}
+
+macro playerSetOnBranch() {
+  playerGetFlags flags;
+  setn mask, 1;               # 1 << playerOnBranchBit
+  bor flags, mask;
+  playerSetFlags flags;
+}
+
+macro playerClearOnBranch() {
+  playerGetFlags flags;
+  setn mask, 1;
+  setn full, 255;
+  bxor full, mask;             # full = ~mask
+  band flags, full;
+  playerSetFlags flags;
+}
+
+macro playerGetOnBranch(w out) {
+  playerGetFlags flags;
+  setn mask, 1;
+  band flags, mask;
+  set out, flags;              # 0 or 1
+}
+
+macro playerSetHasAcorn() {
+  playerGetFlags flags;
+  setn mask, 2;               # 1 << playerHasAcornBit
+  bor flags, mask;
+  playerSetFlags flags;
+}
+
+macro playerClearHasAcorn() {
+  playerGetFlags flags;
+  setn mask, 2;
+  setn full, 255;
+  bxor full, mask;
+  band flags, full;
+  playerSetFlags flags;
+}
+
+macro playerGetHasAcorn(w out) {
+  playerGetFlags flags;
+  setn mask, 2;
+  band flags, mask;
+  set out, flags;             # 0 or 2 (nonzero means true)
+}
+
+macro playerSetEating() {
+  playerGetFlags flags;
+  setn mask, 4;               # 1 << playerEatingBit
+  bor flags, mask;
+  playerSetFlags flags;
+}
+
+macro playerClearEating() {
+  playerGetFlags flags;
+  setn mask, 4;
+  setn full, 255;
+  bxor full, mask;
+  band flags, full;
+  playerSetFlags flags;
+}
+
+macro playerGetEating(w out) {
+  playerGetFlags flags;
+  setn mask, 4;
+  band flags, mask;
+  set out, flags;             # 0 or 4
+}
+
+macro playerInit() {
+  # tileX = 15
+  setn tmp, 15;
+  playerSetTileX tmp;
+
+  # tileY = 15
+  setn tmp, 15;
+  playerSetTileY tmp;
+
+  # flags: onBranch = false, acorn = false, eating = false
+  setn flags, 0;
+  playerSetFlags flags;
+
+  # hp = 3
+  setn tmp, 3;
+  playerSetHp tmp;
+
+  # stateFrames = 0
+  setn tmp, 0;
+  playerSetStateFrames tmp;
+
+  # score = 0
+  setn tmp, 0;
+  playerSetScore tmp;
+}
+
+# --- Tilemap helpers ---
+
+# Given tileX, tileY (0..31), compute:
+#   byteIdx : which byte in tilemap
+#   subIdx  : which 2-bit slot (0..3)
+macro tileCoordToByteAndSubIndex(r tileX, r tileY, w byteIdx, w subIdx) {
+  # byteIdx = tileY * 8
+  set byteIdx, tileY;
+  shl byteIdx;       # *2
+  shl byteIdx;       # *4
+  shl byteIdx;       # *8
+
+  # xDiv4 = tileX / 4
+  set xDiv4, tileX;
+  shr xDiv4;         # /2
+  shr xDiv4;         # /4
+
+  add byteIdx, xDiv4;
+
+  # subIdx = tileX & 3
+  set subIdx, tileX;
+  setn mask3, 3;
+  band subIdx, mask3;
+}
+
+macro tileLoadByte(r byteIdx, w tileByte) {
+  seti tilemap;
+  addi byteIdx;
+  regload;
+  getzero tileByte;
+}
+
+# tileType out: 0=air,1=branch,2=trunk (etc)
+macro tileGetType(r tileX, r tileY, w tileType) {
+  tileCoordToByteAndSubIndex tileX, tileY, byteIdx, subIdx;
+  tileLoadByte byteIdx, tileByte;
+
+  # Case: subIdx == 0
+  set idx, subIdx;
+  skipifeqn idx, 0;
+  goto tile_case1;
+  set val, tileByte;
+  setn mask, 3;          # 0b11
+  band val, mask;
+  set tileType, val;
+  goto tile_done;
+
+tile_case1:
+  # Case: subIdx == 1
+  set idx, subIdx;
+  skipifeqn idx, 1;
+  goto tile_case2;
+  set val, tileByte;
+  shr val;
+  shr val;               # >>2
+  setn mask, 3;
+  band val, mask;
+  set tileType, val;
+  goto tile_done;
+
+tile_case2:
+  # Case: subIdx == 2
+  set idx, subIdx;
+  skipifeqn idx, 2;
+  goto tile_case3;
+  set val, tileByte;
+  shr val; shr val; shr val; shr val;   # >>4
+  setn mask, 3;
+  band val, mask;
+  set tileType, val;
+  goto tile_done;
+
+tile_case3:
+  # Case: subIdx == 3
+  set val, tileByte;
+  shr val; shr val; shr val; shr val; shr val; shr val;   # >>6
+  setn mask, 3;
+  band val, mask;
+  set tileType, val;
+
+tile_done:
+}
+
+# --- Camera ---
+
+macro computeCameraFromPlayer(r tileX, r tileY, w camX, w camY) {
+  # ---------------- X axis ----------------
+  set camX, tileX;
+
+  # If tileX in {0,1,2,3}, clamp camX = 0, no centering or high clamp.
+  set t, tileX;
+  skipifeqn t, 0;
+  goto camx_not0;
+  setn camX, 0;
+  goto camx_done_x;
+
+camx_not0:
+  set t, tileX;
+  skipifeqn t, 1;
+  goto camx_not1;
+  setn camX, 0;
+  goto camx_done_x;
+
+camx_not1:
+  set t, tileX;
+  skipifeqn t, 2;
+  goto camx_not2;
+  setn camX, 0;
+  goto camx_done_x;
+
+camx_not2:
+  set t, tileX;
+  skipifeqn t, 3;
+  goto camx_center;
+  setn camX, 0;
+  goto camx_done_x;
+
+camx_center:
+  # tileX >= 4: first center: camX = tileX - 4
+  addn camX, 252;         # -4
+
+  # If tileX in {28,29,30,31}, clamp camX = 24 (right edge)
+  set t, tileX;
+  skipifeqn t, 28;
+  goto camx_not28;
+  setn camX, 24;
+  goto camx_done_x;
+
+camx_not28:
+  set t, tileX;
+  skipifeqn t, 29;
+  goto camx_not29;
+  setn camX, 24;
+  goto camx_done_x;
+
+camx_not29:
+  set t, tileX;
+  skipifeqn t, 30;
+  goto camx_not30;
+  setn camX, 24;
+  goto camx_done_x;
+
+camx_not30:
+  set t, tileX;
+  skipifeqn t, 31;
+  goto camx_done_x;
+  setn camX, 24;
+
+camx_done_x:
+
+  # ---------------- Y axis ----------------
+  set camY, tileY;
+
+  # If tileY in {0,1}, clamp camY = 0
+  set t, tileY;
+  skipifeqn t, 0;
+  goto camy_not0;
+  setn camY, 0;
+  goto camy_done_y;
+
+camy_not0:
+  set t, tileY;
+  skipifeqn t, 1;
+  goto camy_center;
+  setn camY, 0;
+  goto camy_done_y;
+
+camy_center:
+  # tileY >= 2: center: camY = tileY - 2
+  addn camY, 254;         # -2
+
+  # If tileY in {30,31}, clamp camY = 28 (bottom edge)
+  set t, tileY;
+  skipifeqn t, 30;
+  goto camy_not30;
+  setn camY, 28;
+  goto camy_done_y;
+
+camy_not30:
+  set t, tileY;
+  skipifeqn t, 31;
+  goto camy_done_y;
+  setn camY, 28;
+
+camy_done_y:
+}
+
+# --- Drawing helpers ---
+
+macro drawViewAroundPlayer(r tileX, r tileY) {
+  # Compute camera top-left in tile space
+  computeCameraFromPlayer tileX, tileY, camX, camY;
+
+  # Clear the display
+  clear;
+
+  # Outer loop: viewY = 0..3
+  set viewY, 0;
+viewY_loop:
+  # screenY = viewY * tileSize (8)
+  set screenY, viewY;
+  shl screenY;
+  shl screenY;
+  shl screenY;          # *8
+
+  # worldY = camY + viewY
+  set worldY, camY;
+  add worldY, viewY;
+
+  # Inner loop: viewX = 0..7
+  set viewX, 0;
+viewX_loop:
+  # screenX = viewX * 8
+  set screenX, viewX;
+  shl screenX;
+  shl screenX;
+  shl screenX;
+
+  # worldX = camX + viewX
+  set worldX, camX;
+  add worldX, viewX;
+
+  # Get tile type
+  tileGetType worldX, worldY, tileType;
+
+  # Skip air
+  setn tmp, tileTAir;
+  skipifeq tileType, tmp;
+  goto non_air;
+  goto viewX_next;
+
+non_air:
+  # Branch vs trunk
+  setn tmp, tileTBranch;
+  skipifeq tileType, tmp;
+  goto maybe_trunk;
+  seti spr_branch;
+  draw screenX, screenY, 8;
+  goto viewX_next;
+
+maybe_trunk:
+  setn tmp, tileTTrunk;
+  skipifeq tileType, tmp;
+  goto viewX_next;
+  seti spr_trunk;
+  draw screenX, screenY, 8;
+
+viewX_next:
+  addn viewX, 1;
+  setn limitX, 8;
+  skipifeq viewX, limitX;
+  goto viewX_loop;
+
+  # Next row
+  addn viewY, 1;
+  setn limitY, 4;
+  skipifeq viewY, limitY;
+  goto viewY_loop;
+
+  # After drawing tiles: draw player in this view
+  # player is at (tileX, tileY), camera at (camX, camY)
+
+  # relX = tileX - camX
+  set relX, tileX;
+  set tmpX, camX;
+  sub relX, tmpX;      # relX in [0..7]
+
+  # relY = tileY - camY
+  set relY, tileY;
+  set tmpY, camY;
+  sub relY, tmpY;      # relY in [0..3]
+
+  # screenX = relX * 8
+  set screenX, relX;
+  shl screenX;
+  shl screenX;
+  shl screenX;
+
+  # screenY = relY * 8
+  set screenY, relY;
+  shl screenY;
+  shl screenY;
+  shl screenY;
+
+  drawPlayer screenX, screenY;
+}
 
 # --- Code --- =========================================================
 
@@ -160,37 +882,39 @@ macro erasePlayer(r oldx, r oldy) {
     ... movement ...
   */
 
-macro updatePlayer(rw px, rw py) {
+# Move player tile coordinates (tx, ty) using WASD keys.
+#   A=left, D=right, W=up, S=down.
+macro updatePlayerTile(rw tx, rw ty) {
   # --- LEFT (A -> key index 7) ---
   setn key, 7;
   skipifkey key;
   goto no_left;
-  skipifeqn px, 0;
-  addn px, 255;          # -1 mod 256
+  skipifeqn tx, 0;
+  addn tx, 255;          # tx -= 1
 no_left:
 
   # --- RIGHT (D -> key index 9) ---
   setn key, 9;
   skipifkey key;
   goto no_right;
-  skipifeqn px, 63;      # clamp to screen width 64
-  addn px, 1;
+  skipifeqn tx, 31;      # mapWidth-1
+  addn tx, 1;
 no_right:
 
   # --- UP (W -> key index 5) ---
   setn key, 5;
   skipifkey key;
   goto no_up;
-  skipifeqn py, 0;
-  addn py, 255;          # -1
+  skipifeqn ty, 0;
+  addn ty, 255;          # ty -= 1
 no_up:
 
   # --- DOWN (S -> key index 8) ---
   setn key, 8;
   skipifkey key;
   goto no_down;
-  skipifeqn py, 31;      # clamp to screen height 32
-  addn py, 1;
+  skipifeqn ty, 31;      # mapHeight-1
+  addn ty, 1;
 no_down:
 }
 
@@ -233,23 +957,25 @@ wait_loop:
 }
 
 macro main() {
-  setn px, 16;
-  setn py, 16;
+  # Initialise player struct as per GML (tileX=15, tileY=15, hp=3, etc.)
+  playerInit;
 
-  set oldx, px;
-  set oldy, py;
-  drawPlayer px, py;
+  # Load tile pos into working registers
+  playerGetTileX tx;
+  playerGetTileY ty;
 
 loop:
-  set oldx, px;
-  set oldy, py;
+  # Update tile coordinates from input
+  updatePlayerTile tx, ty;
 
-  updatePlayer px, py;
+  # Store back into player struct
+  playerSetTileX tx;
+  playerSetTileY ty;
 
-  erasePlayer oldx, oldy;
-  drawPlayer px, py;
+  # Draw tiles around player + player sprite in view
+  drawViewAroundPlayer tx, ty;
 
-  waitTicks 1;       # one 60 Hz tick per game step
+  # Simple frame pacing
+  waitTicks 1;
   goto loop;
 }
-
