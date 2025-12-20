@@ -1,5 +1,9 @@
 # --- Constants and regions --- =========================================================
 
+# --- Sprites ---
+
+region spr_player auto 0b00000111, 0b00000111
+
 # --- Map / tiles ---
 
 const mapWidth      32;
@@ -33,7 +37,7 @@ region frameCounter    1;
 # --- Tilemap ---
 
 # Packed tilemap: 4 tiles per byte, 2 bits each
-region tilemap tilemapBytes;
+region tilemap 256; #tilemapBytes;
 
 # --- Nuts ---
 
@@ -62,7 +66,7 @@ const nutFlagHighBit     2;
 const nutDxShift         3;   # 2 bits, 3-4
 const nutDyShift         5;   # 2 bits, 5-6
 
-region nutSlots nutSlotsBytes;
+region nutSlots 48; #nutSlotsBytes;
 
 # --- Enemies ---
 
@@ -87,7 +91,7 @@ const enemyMoveFlagsOff   3       # moveCounter + canDamagePlayer bit
 # Bit within the byte at enemyMoveFlagsOff
 const enemyCanDamageBit 7;      # in byte 3 of the slot
 
-region enemySlots enemySlotsBytes;
+region enemySlots 256; #enemySlotsBytes;
 
 # --- Code --- =========================================================
 
@@ -222,7 +226,7 @@ wait_loop:
 }
 
 macro main() {
-  setn px, someConst;
+  setn px, 16;
   setn py, 16;
 
   set oldx, px;

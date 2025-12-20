@@ -55,7 +55,7 @@ data ArgType = RArg | WArg | RWArg | IntArg | LabelArg | MacroValArg {-TODO clun
 data MacroArg = MacroArg { macroArgType :: ArgType, macroArgName :: String } deriving (Show)
 
 data Macro = Macro { macroArgs :: [MacroArg], macroCaptured :: [String], macroBody :: [Line] } deriving (Show)
-data Region = Region { regionSize :: Word16 } deriving (Show)
+data Region = Region { regionSize :: Word16, regionInit :: [Int] } deriving (Show)
 data RegionDecl = RegionDecl { declRegionName :: String, declRegionRegion :: Region } deriving (Show)
 data Const = Const { constValue :: Int } deriving (Show)
 data ConstDecl = ConstDecl { declConstName :: String, declConstConst :: Const } deriving (Show)
@@ -157,8 +157,31 @@ regionDecl :: Parser RegionDecl
 regionDecl =
   RegionDecl
     <$> (symbol "region" *> lexeme identifier)
-    <*> (Region . fromIntegral <$> numberLiteral)
-    <*  optional semi
+    <*> regionBody
+  where
+    regionBody :: Parser Region
+    regionBody =
+          try explicitSizedRegion
+      <|> autoSizedRegion
+
+    -- region spr_player 16;
+    explicitSizedRegion :: Parser Region
+    explicitSizedRegion =
+      Region
+        <$> (fromIntegral <$> numberLiteral)
+        <*> pure []
+        <*  optional semi
+
+    -- region spr_player auto 0b00000111, 0b00000111;
+    autoSizedRegion :: Parser Region
+    autoSizedRegion =
+      symbol "auto" *>
+      ((\vals -> Region (fromIntegral (length vals)) vals) <$> initList)
+      <* optional semi
+
+    initList :: Parser [Int]
+    initList =
+      numberLiteral `sepBy1` symbol ","
 
 constDecl :: Parser ConstDecl
 constDecl =
@@ -400,6 +423,39 @@ assignRegions start regions =
       let addr' = addr + size
       in (addr', (name, addr))
 
+-- Region initializer injection --
+regionInitInstrCount :: Map.Map String Region -> Int
+regionInitInstrCount regionMap =
+  sum [ 4 * length (regionInit r) | r <- Map.elems regionMap ]
+
+regionInitLines
+  :: Map.Map String Int    -- region name -> base address
+  -> Map.Map String Region -- region name -> Region (with regionInit)
+  -> [Line]
+regionInitLines regionAddr regionMap =
+  concatMap initRegion (Map.toList regionMap)
+  where
+    tmpVar :: String
+    tmpVar = "__regtmp"  -- any name; regAlloc will assign a hardware register
+
+    initRegion :: (String, Region) -> [Line]
+    initRegion (name, Region { regionInit = vals }) =
+      case Map.lookup name regionAddr of
+        Nothing   -> []
+        Just base ->
+          concat [ initByte (base + offset) val
+                 | (offset, val) <- zip [0..] vals
+                 ]
+
+    initByte :: Int -> Int -> [Line]
+    initByte addr val =
+      [ InstrLine (Instr "seti"   [NumLit addr])
+      , InstrLine (Instr "setn"   [VarExpr tmpVar, NumLit val])
+      , InstrLine (Instr "setzero"[VarExpr tmpVar])
+      , InstrLine (Instr "regdump" [])
+      ]
+-- --
+
 -- TODO endianness
 assembleLine
   :: (Assembler m, Monad m)
@@ -561,44 +617,61 @@ main = do
   putStrLn "typecheck:"
   print $ mapM_ (typecheckMacro (Map.union chip8Types $ Map.union regionsTypes $ Map.union constsTypes codeMacroTypes)) [d | DeclMacro _ d <- codeDecls parsedCode] -- TODO check that we don't overwrite builtins. also more generally check that stuff doesnt overwrite other stuff
   g <- getStdGen
-  let lines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) (Set.fromList ([declRegionName d | DeclRegion d <- codeDecls parsedCode] ++ [ declConstName  c | DeclConst  c <- codeDecls parsedCode ])) parsedCode) g
+  let userLines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) (Set.fromList ([declRegionName d | DeclRegion d <- codeDecls parsedCode] ++ [ declConstName  c | DeclConst  c <- codeDecls parsedCode ])) parsedCode) g
   putStrLn "region decls:"
   print $ [d | DeclRegion d <- codeDecls parsedCode]
   putStrLn "const decls:"
   print $ [d | DeclConst d <- codeDecls parsedCode]
-  putStrLn "inlined:"
-  print lines
-  let regs = fromJust $ regAlloc (fst <$> chip8Instrs) lines
-  putStrLn "register allocation:"
-  print regs
-  putStrLn "assembly:"
-  let linesLen = length [x | InstrLine x <- lines]
-  let instrCount = linesLen
+  
   let regionMap = Map.fromList [(declRegionName d, declRegionRegion d) | DeclRegion d <- codeDecls parsedCode]
   let constMap = Map.fromList [(declConstName d, declConstConst d) | DeclConst d <- codeDecls parsedCode]
-  
+  let userInstrCount :: Int
+      userInstrCount = length [x | InstrLine x <- userLines]
+  let initInstrCount :: Int
+      initInstrCount = regionInitInstrCount regionMap
+  let programStart :: Int
+      programStart = 0x200
+  let totalInstrCount :: Int
+      totalInstrCount = userInstrCount + initInstrCount
+
   -- Where your emulator loads the program in RAM.
   -- For wernsey/chip8-style cores this is normally 0x200.
   let programStart = 0x200
-  let regionAddr = regionAddr_
-        where
-          firstDataAddr :: Int
-          firstDataAddr = programStart + 2 * instrCount
+  
+  let firstDataAddr :: Int
+      firstDataAddr = programStart + 2 * totalInstrCount
 
-          -- Region name -> byte address
-          regionAddr_ :: Map.Map String Int
-          regionAddr_ = assignRegions firstDataAddr regionMap
-  let assembly = assemble regs lines labelToAddr regionAddr constMap
-        where
-          -- Instruction index -> byte address
-          labelToAddr :: Int -> Int
-          labelToAddr n = programStart + 2 * n -- instructions are 2 bytes long
-          
-  print $ runAssemblerBase $ assembly
-  putStrLn "instruction count:"
-  print $ instrCount
+  -- Region name -> byte address
+  let regionAddr :: Map.Map String Int
+      regionAddr = assignRegions firstDataAddr regionMap
+      
   putStrLn "region addresses:"
   print $ Map.toList regionAddr
+  
+  -- Instruction index -> byte address
+  let labelToAddr :: Int -> Int
+      labelToAddr n = programStart + 2 * n -- instructions are 2 bytes long
+  
+  -- Actual init code to run before user code
+  let initLines :: [Line]
+      initLines = regionInitLines regionAddr regionMap
+  let allLines :: [Line]
+      allLines = initLines ++ userLines
+      
+  putStrLn "inlined:"
+  --print userLines
+  print allLines
+  
+  let regs = fromJust $ regAlloc (fst <$> chip8Instrs) allLines
+  putStrLn "register allocation:"
+  print regs
+  putStrLn "assembly:"
+  
+  let assembly = assemble regs allLines labelToAddr regionAddr constMap
+          
+  print $ runAssemblerBase $ assembly
+  putStrLn "total instruction count:"
+  print $ totalInstrCount
   putStrLn "machine:"
   let machine = w16to8s $ renderMachineInstrs (snd <$> chip8Instrs) $ runAssemblerBase $ assembly
   let machineLen = length machine
@@ -607,7 +680,7 @@ main = do
   print $ machineLen
   putStrLn "end address of machine code:"
   print $ programStart + machineLen
-  assert (instrCount * 2 == machineLen) (pure ())
+  assert (totalInstrCount * 2 == machineLen) (pure ())
   BS.writeFile "game.ch8" $ BS.pack machine
   putStrLn "wrote file"
   putStrLn ""
