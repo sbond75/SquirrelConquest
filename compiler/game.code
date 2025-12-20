@@ -2,7 +2,14 @@
 
 # --- Sprites ---
 
-region spr_player auto 0b00000111, 0b00000111
+region spr_player auto 0b00000111
+	             , 0b00000111
+	             , 0b00001111
+	             , 0b11001110
+	             , 0b11111100
+	             , 0b11111000
+	             , 0b00111000
+	             , 0b00111110
 
 # --- Map / tiles ---
 
@@ -127,14 +134,14 @@ macro writeMemConst(int memloc, int val) {
 
 /* Set I to player sprite and draw it at (px, py) */
 macro drawPlayer(r px, r py) {
-  seti player;          # TODO: sprite data at I = player
-  draw px, py, 5;    # TODO: 5 = sprite height
+  seti spr_player;   # sprite data at I = spr_player
+  draw px, py, 8;    # 8 = sprite height
 }
 
 /* Erase sprite at old position using XOR draw */
 macro erasePlayer(r oldx, r oldy) {
-  seti player;
-  draw oldx, oldy, 5;
+  seti spr_player;
+  draw oldx, oldy, 8;
 }
 
 /*
