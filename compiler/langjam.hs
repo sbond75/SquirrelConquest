@@ -78,6 +78,20 @@ spaceConsumer =
 lexeme :: Parser a -> Parser a
 lexeme = Lexer.lexeme spaceConsumer
 
+numberLiteral :: Parser Int
+numberLiteral =
+  lexeme $
+       binaryLiteral
+   <|> decimalLiteral
+  where
+    decimalLiteral :: Parser Int
+    decimalLiteral = fromInteger <$> Lexer.decimal
+
+    binaryLiteral :: Parser Int
+    binaryLiteral =
+      chunk "0b" *> (fromInteger <$> Lexer.binary)
+      -- parses 0b[01]+ as binary 
+
 -- Identifier: [A-Za-z_][A-Za-z0-9_]*
 identifier :: Parser String
 identifier =
@@ -85,7 +99,11 @@ identifier =
       <*> many (alphaNumChar <|> char '_')
 
 expr :: Parser Expr
-expr = (NumLit . read <$> lexeme (some digitChar)) <|> (VarExpr <$> lexeme identifier) <|> macroExpr <|> macroExprWithArgs
+expr =
+      (NumLit <$> numberLiteral)
+  <|> (VarExpr <$> lexeme identifier)
+  <|> macroExpr
+  <|> macroExprWithArgs
 
 instr :: Parser Instr
 instr = Instr <$> lexeme (identifier <* space1) <*> (sepBy (lexeme expr) (lexeme $ char ',')) <* char ';'
@@ -136,10 +154,18 @@ semi :: Parser ()
 semi = void (symbol ";")
 
 regionDecl :: Parser RegionDecl
-regionDecl = string "region" >> space1 >> (RegionDecl <$> lexeme identifier <*> (Region <$> lexeme word16)) <* optional semi
+regionDecl =
+  RegionDecl
+    <$> (symbol "region" *> lexeme identifier)
+    <*> (Region . fromIntegral <$> numberLiteral)
+    <*  optional semi
 
 constDecl :: Parser ConstDecl
-constDecl = string "const" >> space1 >> (ConstDecl <$> lexeme identifier <*> (Const <$> lexeme intParser)) <* optional semi
+constDecl =
+  ConstDecl
+    <$> (symbol "const" *> lexeme identifier)
+    <*> (Const <$> numberLiteral)
+    <*  optional semi
 
 decl :: Parser Decl
 decl =
