@@ -679,7 +679,16 @@ main = do
   putStrLn "length of machine code (bytes):"
   print $ machineLen
   putStrLn "end address of machine code:"
-  print $ programStart + machineLen
+  let endInstructionsAddr = programStart + machineLen
+  print $ endInstructionsAddr
+  putStrLn "end address of last region (highest memory used):"
+  let highestUsed = maybe endInstructionsAddr
+            (\(name, addr) ->
+               case Map.lookup name regionMap of
+                 Just extra -> addr + (fromIntegral $ regionSize extra)
+                 Nothing    -> endInstructionsAddr)
+            (Map.lookupMax regionAddr)
+  print $ highestUsed
   assert (totalInstrCount * 2 == machineLen) (pure ())
   BS.writeFile "game.ch8" $ BS.pack machine
   putStrLn "wrote file"
