@@ -1,3 +1,141 @@
+# --- Control flow helpers --- =========================================================
+
+# ============================================================
+# ifeq / ifneq
+#   ifeq(x, y,  ifCase, elseCase)
+#   ifneq(x, y, ifCase, elseCase)
+# ============================================================
+
+macro ifeq(r x, r y, macro() ifCase, macro() elseCase) {
+  # if (x == y) { ifCase } else { elseCase }
+
+  skipifeq x, y;      # if x == y, skip next
+  goto ifeq_else;     # executed only when x != y
+  ifCase;
+  goto ifeq_done;
+ifeq_else:
+  elseCase;
+ifeq_done:
+}
+
+macro ifneq(r x, r y, macro() ifCase, macro() elseCase) {
+  # if (x != y) { ifCase } else { elseCase }
+
+  skipifneq x, y;     # if x != y, skip next
+  goto ifneq_else;    # executed only when x == y
+  ifCase;
+  goto ifneq_done;
+ifneq_else:
+  elseCase;
+ifneq_done:
+}
+
+
+# ============================================================
+# Boolean NOT / AND / OR on 0 / non-zero
+#
+#   not(x)          : x = (!x) ? 1 : 0
+#   and(out, a, b)  : out = (a != 0 && b != 0) ? 1 : 0
+#   or(out, a, b)   : out = (a != 0 || b != 0) ? 1 : 0
+#
+# Uses your existing ifNZ(cond, ifCase, elseCase).
+# ============================================================
+
+macro not(rw x) {
+  # x = (!x) ? 1 : 0
+  ifNZ x,
+    { setn x, 0; },   # x != 0 → false
+    { setn x, 1; };   # x == 0 → true
+}
+
+macro and(rw out, r a, r b) {
+  # out = (a && b) ? 1 : 0
+
+  # First test a
+  set out, a;
+  ifNZ out,
+    {
+      # a is true, now test b
+      set out, b;
+      ifNZ out,
+        { setn out, 1; },   # both non-zero → true
+        { setn out, 0; };   # b == 0 → false
+    },
+    {
+      # a == 0 → whole AND is false
+      setn out, 0;
+    };
+}
+
+macro or(rw out, r a, r b) {
+  # out = (a || b) ? 1 : 0
+
+  # First test a
+  set out, a;
+  ifNZ out,
+    {
+      # a is true → OR is true
+      setn out, 1;
+    },
+    {
+      # a == 0, so result depends on b
+      set out, b;
+      ifNZ out,
+        { setn out, 1; },   # b != 0 → true
+        { setn out, 0; };   # both zero → false
+    };
+}
+
+
+# ============================================================
+# for loops
+#
+# 1) forRange(i, start, end, body(i)):
+#      for (i = start; i < end; ++i) body(i)
+#
+# 2) forCount(n, body(i)):
+#      for (i = 0; i < n; ++i) body(i)
+#
+# Both forms pass the loop index as an rw macro argument.
+# ============================================================
+
+macro forRange(rw i, int start, int end, macro(rw) body) {
+  # i runs from [start, end) (end is exclusive)
+
+  setn i, start;
+  setn limit, end;
+forRange_loop:
+  # if (i == limit) break;
+  skipifeq i, limit;      # if i == limit, skip next
+  goto forRange_body;     # executed when i != limit
+  goto forRange_done;     # executed when i == limit
+
+forRange_body:
+  body i;
+  addn i, 1;
+  goto forRange_loop;
+
+forRange_done:
+}
+
+macro forCount(int n, macro(rw) body) {
+  # for i in [0, n): body(i)
+
+  setn i, 0;
+  setn limit, n;
+forCount_loop:
+  skipifeq i, limit;      # if i == limit, skip next
+  goto forCount_body;     # executed when i != limit
+  goto forCount_done;     # executed when i == limit
+
+forCount_body:
+  body i;
+  addn i, 1;
+  goto forCount_loop;
+
+forCount_done:
+}
+
 # --- Constants and regions --- =========================================================
 
 # --- Sprites ---
@@ -618,6 +756,302 @@ tile_case3:
 tile_done:
 }
 
+# ============================================================
+# Tile store helper (packed tilemap: 4 tiles / byte, 2 bits each)
+# ============================================================
+
+macro tileStoreByte(r byteIdx, r tileByte) {
+  seti tilemap;
+  addi byteIdx;
+  setzero tileByte;
+  regdump;
+}
+
+# tileSetType:
+#   tileType: 0 = air, 1 = branch, 2 = trunk (2-bit value)
+macro tileSetType(r tileX, r tileY, r tileType) {
+  tileCoordToByteAndSubIndex tileX, tileY, byteIdx, subIdx;
+  tileLoadByte byteIdx, tileByte;
+
+  # val = tileType & 3 (2-bit)
+  set val, tileType;
+  setn mask3, 3;
+  band val, mask3;
+
+  # subIdx selects which 2-bit slot inside the byte
+  set idx, subIdx;
+  skipifeqn idx, 0;
+  goto tileSet_case1;
+  # ---- case subIdx == 0 (bits 0..1) ----
+  setn maskClear, 252;         # 11111100
+  band tileByte, maskClear;    # clear bits 0..1
+  bor tileByte, val;           # put val at bits 0..1
+  goto tileSet_write;
+
+tileSet_case1:
+  set idx, subIdx;
+  skipifeqn idx, 1;
+  goto tileSet_case2;
+  # ---- case subIdx == 1 (bits 2..3) ----
+  setn maskClear, 243;         # 11110011
+  band tileByte, maskClear;    # clear bits 2..3
+  shl val;                     # <<1
+  shl val;                     # <<2 total
+  bor tileByte, val;
+  goto tileSet_write;
+
+tileSet_case2:
+  set idx, subIdx;
+  skipifeqn idx, 2;
+  goto tileSet_case3;
+  # ---- case subIdx == 2 (bits 4..5) ----
+  setn maskClear, 207;         # 11001111
+  band tileByte, maskClear;    # clear bits 4..5
+  shl val; shl val; shl val; shl val;   # <<4
+  bor tileByte, val;
+  goto tileSet_write;
+
+tileSet_case3:
+  # ---- case subIdx == 3 (bits 6..7) ----
+  setn maskClear, 63;          # 00111111
+  band tileByte, maskClear;    # clear bits 6..7
+  shl val; shl val; shl val; shl val; shl val; shl val;   # <<6
+  bor tileByte, val;
+
+tileSet_write:
+  tileStoreByte byteIdx, tileByte;
+}
+
+# Convenience wrappers for constants
+macro setTileAir(r tileX, r tileY) {
+  setn tType, tileTAir;
+  tileSetType tileX, tileY, tType;
+}
+
+macro setTileBranch(r tileX, r tileY) {
+  setn tType, tileTBranch;
+  tileSetType tileX, tileY, tType;
+}
+
+macro setTileTrunk(r tileX, r tileY) {
+  setn tType, tileTTrunk;
+  tileSetType tileX, tileY, tType;
+}
+
+
+# ============================================================
+# Random tile helpers (0..31) using CHIP-8 rand
+#   mapWidth = mapHeight = 32, so just mask with 31
+# ============================================================
+
+macro randTileX(w out) {
+  rand out, 255;      # random byte
+  setn mask, 31;      # 0b00011111
+  band out, mask;     # 0..31
+}
+
+macro randTileY(w out) {
+  rand out, 255;
+  setn mask, 31;
+  band out, mask;
+}
+
+# --- Level gen ---
+
+# ============================================================
+# scr_level_init
+#   - zero enemyCounter, nutCounter, frameCounter
+#   - clear packed tilemap bytes
+#   - clear nutSlots and enemySlots arrays
+# ============================================================
+
+macro scr_level_init() {
+  # --- zero counters (each is a 1-byte region) ---
+
+  setn tmp, 0;
+
+  setn off, 0;
+  seti enemyCounter;
+  addi off;
+  setzero tmp;
+  regdump;
+
+  setn off, 0;
+  seti nutCounter;
+  addi off;
+  setzero tmp;
+  regdump;
+
+  setn off, 0;
+  seti frameCounter;
+  addi off;
+  setzero tmp;
+  regdump;
+
+  # --- clear tilemap (tilemapBytes bytes) ---
+
+  setn i, 0;
+  setn limit, tilemapBytes;
+scrLevelInit_tile_loop:
+  skipifeq i, limit;
+  goto scrLevelInit_tile_body;
+  goto scrLevelInit_tile_done;
+
+scrLevelInit_tile_body:
+  seti tilemap;
+  addi i;
+  setzero tmp;
+  regdump;
+  addn i, 1;
+  goto scrLevelInit_tile_loop;
+
+scrLevelInit_tile_done:
+
+  # --- clear nutSlots (nutSlotsBytes bytes) ---
+
+  setn i, 0;
+  setn limit, nutSlotsBytes;
+scrLevelInit_nut_loop:
+  skipifeq i, limit;
+  goto scrLevelInit_nut_body;
+  goto scrLevelInit_nut_done;
+
+scrLevelInit_nut_body:
+  seti nutSlots;
+  addi i;
+  setzero tmp;
+  regdump;
+  addn i, 1;
+  goto scrLevelInit_nut_loop;
+
+scrLevelInit_nut_done:
+
+  # --- clear enemySlots (enemySlotsBytes bytes) ---
+
+  setn i, 0;
+  setn limit, enemySlotsBytes;
+scrLevelInit_enemy_loop:
+  skipifeq i, limit;
+  goto scrLevelInit_enemy_body;
+  goto scrLevelInit_enemy_done;
+
+scrLevelInit_enemy_body:
+  seti enemySlots;
+  addi i;
+  setzero tmp;
+  regdump;
+  addn i, 1;
+  goto scrLevelInit_enemy_loop;
+
+scrLevelInit_enemy_done:
+}
+
+
+# ============================================================
+# scr_levelgen_init
+#   Simplified version of your GML:
+#   - Choose n random trunk positions
+#   - For each trunk, place plus-shaped branches around it
+#   (no acorns/enemies here; those can be added later)
+# ============================================================
+
+const levelGenTrees 20;   # n in the GML
+
+macro scr_levelgen_init() {
+  # centerX / centerY if you want to use them later
+  # (mapWidth / 2, mapHeight / 2) = (16,16) with 32x32 map
+  setn centerX, 16;
+  setn centerY, 16;
+
+  # kernelRadius = 1, implemented as a “plus” around the trunk
+
+  setn i, 0;
+  setn limit, levelGenTrees;
+
+scrLevelGen_tree_loop:
+  # if (i == limit) break;
+  skipifeq i, limit;
+  goto scrLevelGen_tree_body;
+  goto scrLevelGen_tree_done;
+
+scrLevelGen_tree_body:
+  # --- pick random tileX, tileY in [0..31] ---
+
+  randTileX tileX;
+  randTileY tileY;
+
+  # Optional: simple center exclusion box if you want
+  # (commented out; enable if needed)
+  #
+  # set cdx, tileX;
+  # set cdy, tileY;
+  #
+  # Here you could approximate a center exclusion region
+  # around (centerX, centerY) by checking equality against
+  # a small set of values, but omitted for now.
+
+  # --- place trunk at (tileX, tileY) ---
+  setTileTrunk tileX, tileY;
+
+  # --- plus-shaped branches around trunk ---
+
+  # UP: (tileY > 0) → (tileX, tileY-1)
+  set t, tileY;
+  skipifeqn t, 0;
+  goto scrLevelGen_no_up;
+  set bx, tileX;
+  set by, tileY;
+  addn by, 255;           # by = tileY - 1
+  setTileBranch bx, by;
+scrLevelGen_no_up:
+
+  # DOWN: (tileY < mapHeight-1 = 31) → (tileX, tileY+1)
+  set t, tileY;
+  skipifeqn t, 31;
+  goto scrLevelGen_do_down;
+  goto scrLevelGen_no_down;
+scrLevelGen_do_down:
+  set bx, tileX;
+  set by, tileY;
+  addn by, 1;             # by = tileY + 1
+  setTileBranch bx, by;
+scrLevelGen_no_down:
+
+  # LEFT: (tileX > 0) → (tileX-1, tileY)
+  set t, tileX;
+  skipifeqn t, 0;
+  goto scrLevelGen_no_left;
+  set bx, tileX;
+  set by, tileY;
+  addn bx, 255;           # bx = tileX - 1
+  setTileBranch bx, by;
+scrLevelGen_no_left:
+
+  # RIGHT: (tileX < mapWidth-1 = 31) → (tileX+1, tileY)
+  set t, tileX;
+  skipifeqn t, 31;
+  goto scrLevelGen_do_right;
+  goto scrLevelGen_no_right;
+scrLevelGen_do_right:
+  set bx, tileX;
+  set by, tileY;
+  addn bx, 1;             # bx = tileX + 1
+  setTileBranch bx, by;
+scrLevelGen_no_right:
+
+  # next tree
+  addn i, 1;
+  goto scrLevelGen_tree_loop;
+
+scrLevelGen_tree_done:
+  # At this point:
+  #   - tilemap has random tree clusters (trunk + branches)
+  # You can later add:
+  #   - acorn placement based on tile type
+  #   - enemy placement functions built on enemySlots/nutSlots
+}
+
+
 # --- Camera ---
 
 macro computeCameraFromPlayer(r tileX, r tileY, rw camX, rw camY) {
@@ -932,8 +1366,12 @@ wait_loop:
 }
 
 macro main() {
+  scr_level_init;
+
   # Initialise player struct as per GML (tileX=15, tileY=15, hp=3, etc.)
   playerInit;
+
+  scr_levelgen_init;
 
   # Load tile pos into working registers
   playerGetTileX tx;
