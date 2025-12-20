@@ -1,0 +1,104 @@
+region font auto 0b01110,
+                 0b01010,
+                 0b01010,
+                 0b01010,
+                 0b01110,
+                 0, 0, 0,
+
+                 0b00010,
+                 0b00010,
+                 0b00010,
+                 0b00010,
+                 0b00010,
+                 0, 0, 0,
+
+                 0b01110,
+                 0b00010,
+                 0b01110,
+                 0b01000,
+                 0b01110,
+                 0, 0, 0,
+
+                 0b01110,
+                 0b00010,
+                 0b01110,
+                 0b00010,
+                 0b01110,
+                 0, 0, 0,
+
+                 0b01010,
+                 0b01010,
+                 0b01110,
+                 0b00010,
+                 0b00010,
+                 0, 0, 0,
+
+                 0b01110,
+                 0b01000,
+                 0b01110,
+                 0b00010,
+                 0b01110,
+                 0, 0, 0,
+
+                 0b01110,
+                 0b01000,
+                 0b01110,
+                 0b01010,
+                 0b01110,
+                 0, 0, 0,
+
+                 0b01110,
+                 0b00010,
+                 0b00010,
+                 0b00010,
+                 0b00010,
+                 0, 0, 0,
+
+                 0b01110,
+                 0b01010,
+                 0b01110,
+                 0b01010,
+                 0b01110,
+                 0, 0, 0,
+
+                 0b01110,
+                 0b01010,
+                 0b01110,
+                 0b00010,
+                 0b00010
+
+region bcdZone 3 # welcome to the bcd zone
+
+macro drawNum1(r num, r x, r y) {
+  seti font;
+  set offset, num;
+  shl offset;
+  shl offset;
+  shl offset;
+  addi offset;
+  draw x, y, 5;
+}
+
+macro drawNum2(r num, rw x, r y) {
+  seti bcdZone;
+  bcd num;
+  setn one, 1; # whatever man
+  addi one;
+  regload;
+  getzero n;
+  drawNum1 n, x, y;
+  addn x, 5;
+  seti bcdZone;
+  setn two, 2; # whatever man
+  addi two;
+  regload;
+  getzero n;
+  drawNum1 n, x, y;
+}
+
+macro main() {
+  setn num, 67;
+  setn x, 3;
+  setn y, 5;
+  drawNum2 num, x, y;
+}

@@ -7,7 +7,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Void (Void)
-import Data.Maybe (fromJust, catMaybes, fromMaybe)
+import Data.Maybe (fromJust, catMaybes, fromMaybe, maybe)
 import Data.Either (either)
 import Data.Functor.Identity (runIdentity)
 import Control.Monad.State (evalState, execState, execStateT, modify, gets, get)
@@ -29,7 +29,7 @@ import qualified Data.Text.IO as TIO
 import System.Environment (getArgs)
 import System.Exit (die)
 import GHC.Stack (HasCallStack, prettyCallStack, callStack)
-import Data.Either.Extra (mapLeft)
+import Data.Either.Extra (mapLeft, fromRight')
 
 lookupOrDie
     :: (Ord k, Show k, HasCallStack)
@@ -377,7 +377,7 @@ invertGraph :: (Ord a, Ord b) => Map.Map a (Set.Set b) -> Map.Map b (Set.Set a)
 invertGraph = Map.unionsWith (<>) . fmap helper . Map.toList where
   helper (x, ys) = Map.fromList $ zip (Set.toList ys) $ fmap Set.singleton $ repeat x
 
-regAlloc :: Map.Map String ([ArgType], Maybe (Set.Set Int)) -> [Line] -> Maybe (Map.Map String HardwareRegister)
+regAlloc :: Map.Map String ([ArgType], Maybe (Set.Set Int)) -> [Line] -> Either String (Map.Map String HardwareRegister)
 regAlloc instrTypes l = execStateT (mapM_ handleReg regList) Map.empty where
   readWrites = regAllocGatherReadWrites (fst <$> instrTypes) l
   lineToReads = invertGraph $ fst <$> readWrites
@@ -395,7 +395,8 @@ regAlloc instrTypes l = execStateT (mapM_ handleReg regList) Map.empty where
     let allOverlaps = Set.delete reg $ fold $ catMaybes $ flip Map.lookup livenessPerLine <$> Set.toList allLines
     let allOverlapsHardware = Set.fromList $ catMaybes $ flip Map.lookup currentMap <$> Set.toList allOverlaps
     let hardwarePossibilities = Set.difference allRegs allOverlapsHardware
-    hardware <- lift $ Set.lookupMin hardwarePossibilities
+    let errMsg = "Reg alloc failed for " <> reg <> "... allLines: " <> show allLines <> " allOverlaps: " <> show allOverlaps
+    hardware <- lift $ maybe (Left errMsg) pure $ Set.lookupMin hardwarePossibilities
     modify (Map.insert reg hardware)
 
 class Assembler m where
@@ -683,7 +684,7 @@ main = do
   --print userLines
   print allLines
   
-  let regs = fromJust $ regAlloc (fst <$> chip8Instrs) allLines
+  let regs = fromRight' $ regAlloc (fst <$> chip8Instrs) allLines
   putStrLn "register allocation:"
   print regs
   putStrLn "assembly:"
