@@ -972,12 +972,12 @@ macro inCenterExcludeSimple(r mx, r my, int centerX, int centerY, w out) {
 
   set tx, mx;
   setn cxImm, centerX;
-  skipifeqn tx, cxImm;
+  skipifeq tx, cxImm;
   goto not_excluded_center;
 
   set ty, my;
   setn cyImm, centerY;
-  skipifeqn ty, cyImm;
+  skipifeq ty, cyImm;
   goto not_excluded_center;
 
   # Both coordinates match center
@@ -1076,106 +1076,6 @@ macro placeTreeKernelRadius2(r tileX, r tileY) {
   setTileBranch kx, ky;
 }
 
-# New scr_levelgen_init: bigger trees + acorns + enemies
-macro scr_levelgen_init() {
-  # Center in tile space for exclusions
-  setn centerX, 16;      # mapWidth / 2 for 32x32
-  setn centerY, 16;      # mapHeight / 2
-
-  # --- 1. Place trunks + radius-2 branch kernel ----------------------
-
-  setn i, 0;
-  setn limitTrees, levelGenTrees;
-
-tree_loop:
-  skipifeq i, limitTrees;
-  goto tree_body;
-  goto tree_done;
-
-tree_body:
-  randTileX tileX;
-  randTileY tileY;
-
-  # Avoid extreme edges so kernel is always in-bounds:
-  # skip if x in {0,1,30,31} or y in {0,1,30,31}
-  set tx, tileX;
-  setn zero, 0;
-  skipifeqn tx, zero;
-  goto not_x0;
-  goto next_tree;
-not_x0:
-  setn oneX, 1;
-  skipifeqn tx, oneX;
-  goto not_x1;
-  goto next_tree;
-not_x1:
-  setn thirty, 30;
-  skipifeqn tx, thirty;
-  goto not_x30;
-  goto next_tree;
-not_x30:
-  setn thirty1, 31;
-  skipifeqn tx, thirty1;
-  goto not_x31;
-  goto next_tree;
-not_x31:
-
-  set ty, tileY;
-  setn zeroY, 0;
-  skipifeqn ty, zeroY;
-  goto not_y0;
-  goto next_tree;
-not_y0:
-  setn oneY, 1;
-  skipifeqn ty, oneY;
-  goto not_y1;
-  goto next_tree;
-not_y1:
-  setn thirtyY, 30;
-  skipifeqn ty, thirtyY;
-  goto not_y30;
-  goto next_tree;
-not_y30:
-  setn thirty1Y, 31;
-  skipifeqn ty, thirty1Y;
-  goto not_y31;
-  goto next_tree;
-not_y31:
-
-  # Center exclusion region (here: just the exact center tile)
-  inCenterExcludeSimple tileX, tileY, 16, 16, excludedTree;
-  setn oneFlag, 1;
-  skipifeq excludedTree, oneFlag;
-  goto place_tree_here;
-  goto next_tree;
-
-place_tree_here:
-  # Trunk at center
-  setTileTrunk tileX, tileY;
-  # Surrounding branch "blob"
-  placeTreeKernelRadius2 tileX, tileY;
-
-next_tree:
-  addn i, 1;
-  goto tree_loop;
-
-tree_done:
-
-  # --- 2. Place acorns -----------------------------------------------
-
-  # Use the same center we just used for tree exclusion
-  spawnAcorns numNuts, 16, 16;
-
-  # --- 3. Place enemies ----------------------------------------------
-
-  # Example target counts: 8 rattlesnakes, then up to 16 total with eagles.
-  setn limR, 8;
-  spawnRattlesnakes limR, 16, 16;
-
-  setn limE, 16;       # total enemyCounter target after eagles
-  spawnEagles limE, 16, 16;
-}
-
 # Try to place one acorn at (mx,my), given center exclusion.
 macro trySpawnSingleNutAt(r mx, r my, int centerX, int centerY) {
   # Exclude center region
@@ -1249,7 +1149,7 @@ nut_outer_mx:
 
     # Stop if nutCounter reached targetNut
     getNutCounter curNut;
-    setn tmpNutLimit, targetNut;
+    set tmpNutLimit, targetNut;
     skipifeq curNut, tmpNutLimit;
     goto nut_do_cell;
     goto spawnAcorns_done;
@@ -1270,6 +1170,106 @@ nut_do_cell:
   goto nut_outer_my;
 
 spawnAcorns_done:
+}
+
+# New scr_levelgen_init: bigger trees + acorns + enemies
+macro scr_levelgen_init() {
+  # Center in tile space for exclusions
+  setn centerX, 16;      # mapWidth / 2 for 32x32
+  setn centerY, 16;      # mapHeight / 2
+
+  # --- 1. Place trunks + radius-2 branch kernel ----------------------
+
+  setn i, 0;
+  setn limitTrees, levelGenTrees;
+
+tree_loop:
+  skipifeq i, limitTrees;
+  goto tree_body;
+  goto tree_done;
+
+tree_body:
+  randTileX tileX;
+  randTileY tileY;
+
+  # Avoid extreme edges so kernel is always in-bounds:
+  # skip if x in {0,1,30,31} or y in {0,1,30,31}
+  set tx, tileX;
+  setn zero, 0;
+  skipifeq tx, zero;
+  goto not_x0;
+  goto next_tree;
+not_x0:
+  setn oneX, 1;
+  skipifeq tx, oneX;
+  goto not_x1;
+  goto next_tree;
+not_x1:
+  setn thirty, 30;
+  skipifeq tx, thirty;
+  goto not_x30;
+  goto next_tree;
+not_x30:
+  setn thirty1, 31;
+  skipifeq tx, thirty1;
+  goto not_x31;
+  goto next_tree;
+not_x31:
+
+  set ty, tileY;
+  setn zeroY, 0;
+  skipifeq ty, zeroY;
+  goto not_y0;
+  goto next_tree;
+not_y0:
+  setn oneY, 1;
+  skipifeq ty, oneY;
+  goto not_y1;
+  goto next_tree;
+not_y1:
+  setn thirtyY, 30;
+  skipifeq ty, thirtyY;
+  goto not_y30;
+  goto next_tree;
+not_y30:
+  setn thirty1Y, 31;
+  skipifeq ty, thirty1Y;
+  goto not_y31;
+  goto next_tree;
+not_y31:
+
+  # Center exclusion region (here: just the exact center tile)
+  inCenterExcludeSimple tileX, tileY, 16, 16, excludedTree;
+  setn oneFlag, 1;
+  skipifeq excludedTree, oneFlag;
+  goto place_tree_here;
+  goto next_tree;
+
+place_tree_here:
+  # Trunk at center
+  setTileTrunk tileX, tileY;
+  # Surrounding branch "blob"
+  placeTreeKernelRadius2 tileX, tileY;
+
+next_tree:
+  addn i, 1;
+  goto tree_loop;
+
+tree_done:
+
+  # --- 2. Place acorns -----------------------------------------------
+
+  # Use the same center we just used for tree exclusion
+  spawnAcorns numNuts, 16, 16;
+
+  # --- 3. Place enemies ----------------------------------------------
+
+  # Example target counts: 8 rattlesnakes, then up to 16 total with eagles.
+  setn limR, 8;
+  spawnRattlesnakes limR, 16, 16;
+
+  setn limE, 16;       # total enemyCounter target after eagles
+  spawnEagles limE, 16, 16;
 }
 
 # Try to spawn a rattlesnake at (mx,my) if:
