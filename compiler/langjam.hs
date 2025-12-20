@@ -491,8 +491,9 @@ main = do
   let regions = Set.fromList [declRegionName d | DeclRegion d <- codeDecls parsedCode]
   let regionsTypes = Map.fromList $ zip (Set.toList regions) (repeat IntArg)
   let consts = Set.fromList [declConstName d | DeclConst d <- codeDecls parsedCode]
+  let constsTypes = Map.fromList $ zip (Set.toList consts) (repeat IntArg)
   putStrLn "typecheck:"
-  print $ mapM_ (typecheckMacro (Map.union chip8Types $ Map.union regionsTypes codeMacroTypes)) [d | DeclMacro _ d <- codeDecls parsedCode] -- TODO check that we don't overwrite builtins. also more generally check that stuff doesnt overwrite other stuff
+  print $ mapM_ (typecheckMacro (Map.union chip8Types $ Map.union regionsTypes $ Map.union constsTypes codeMacroTypes)) [d | DeclMacro _ d <- codeDecls parsedCode] -- TODO check that we don't overwrite builtins. also more generally check that stuff doesnt overwrite other stuff
   g <- getStdGen
   let lines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) (Set.fromList ([declRegionName d | DeclRegion d <- codeDecls parsedCode] ++ [ declConstName  c | DeclConst  c <- codeDecls parsedCode ])) parsedCode) g
   putStrLn "region decls:"
