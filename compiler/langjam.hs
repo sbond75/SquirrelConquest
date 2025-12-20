@@ -19,7 +19,7 @@ import Control.Arrow (first, second)
 import Data.Foldable (fold)
 import Control.Monad (when, void)
 import Data.Word (Word32, Word8)
-import Data.Bits (shiftL, shiftR, (.|.))
+import Data.Bits (shiftL, shiftR, (.|.), (.&.))
 import Control.Monad.Writer (Writer, runWriter, tell)
 import Numeric (showHex)
 import qualified Data.ByteString as BS
@@ -530,10 +530,11 @@ renderMachineInstr (MachineInstr{..}) Vanilla = foldl (.|.) baseBytes . fmap pro
   processArg (argNum, Left v) = shiftL (fromIntegral $ fromEnum v) (8 - 4*argNum)
   -- number values are all the way to the right, so we don't need to worry about shifting them; additional space changes their max value, not their shift amt
   processArg (_, Right n) = fromIntegral n
-renderMachineInstr (MachineInstr{..}) Chip83 = foldl (.|.) (shiftL baseBytes 8) . fmap processArg . zip [0..] where
+renderMachineInstr (MachineInstr{..}) Chip83 = foldl (.|.) baseBytes' . fmap processArg . zip [0..] where
+  baseBytes' = (shiftL baseBytes 8 .&. 0xFF0000) .|. (baseBytes .&. 0xFF)
   -- each increment of argNum we shift 4 less
   -- we start at position 2 ie <<8
-  processArg (argNum, Left v) = shiftL (fromIntegral $ fromEnum v) (12 - 4*argNum)
+  processArg (argNum, Left v) = shiftL (fromIntegral $ fromEnum v) (16 - 4*argNum)
   -- number values are all the way to the right, so we don't need to worry about shifting them; additional space changes their max value, not their shift amt
   processArg (_, Right n) = fromIntegral n
 
@@ -596,7 +597,7 @@ chip8Types = (MacroValArg . fst . fst) <$> chip8Instrs
 
 w32to8 :: Mode -> Word32 -> [Word8]
 w32to8 Vanilla w = [fromIntegral $ shiftR w 8, fromIntegral w]
-w32to8 Chip83 w = [fromIntegral $ shiftR w 12, fromIntegral $ shiftR w 8, fromIntegral w]
+w32to8 Chip83 w = [fromIntegral $ shiftR w 16, fromIntegral $ shiftR w 8, fromIntegral w]
 
 w32to8s :: Mode -> [Word32] -> [Word8]
 w32to8s m = concatMap (w32to8 m)
@@ -691,7 +692,9 @@ main = do
   putStrLn "total instruction count:"
   print $ totalInstrCount
   putStrLn "machine:"
-  let machine = w32to8s Chip83 $ renderMachineInstrs (snd <$> chip8Instrs) Chip83 $ runAssemblerBase $ assembly
+  let mode = Chip83
+  -- let mode = Vanilla
+  let machine = w32to8s mode $ renderMachineInstrs (snd <$> chip8Instrs) mode $ runAssemblerBase $ assembly
   let machineLen = length machine
   print $ fmap (flip showHex "") $ machine
   putStrLn "length of machine code (bytes):"
