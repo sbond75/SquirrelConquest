@@ -860,12 +860,6 @@ macro drawPlayer(r px, r py) {
   draw px, py, 8;    # 8 = sprite height
 }
 
-/* Erase sprite at old position using XOR draw */
-macro erasePlayer(r oldx, r oldy) {
-  seti spr_player;
-  draw oldx, oldy, 8;
-}
-
 /*
   Movement with WASD:
 
@@ -916,26 +910,6 @@ no_up:
   skipifeqn ty, 31;      # mapHeight-1
   addn ty, 1;
 no_down:
-}
-
-/*
-  Only erase/redraw if the player actually moved.
-*/
-macro redrawIfMoved(r px, r py, r oldx, r oldy) {
-  set movedx, px;
-  skipifeq movedx, oldx;
-  goto moved;
-
-  set movedy, py;
-  skipifeq movedy, oldy;
-  goto moved;
-
-  goto nomove;
-
-moved:
-  erasePlayer oldx, oldy;
-  drawPlayer px, py;
-nomove:
 }
 
 /*
