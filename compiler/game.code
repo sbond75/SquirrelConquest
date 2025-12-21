@@ -186,24 +186,24 @@ region spr_eagle auto  0b10000001
 	             , 0b00100100
 	             , 0b00000000
 
-region spr_nut auto    0b00100000
-	             , 0b00101000
+region spr_nut auto    0b00000000
+	             , 0b01111110
+	             , 0b11111111
+	             , 0b01111110
 	             , 0b00111100
-	             , 0b01111100
-	             , 0b01111111
-	             , 0b11111100
-	             , 0b00100010
-	             , 0b01000001
+	             , 0b00111100
+	             , 0b00111100
+	             , 0b00011000
 
 region spr_rattlesnake auto
-		       0b00100000
-	             , 0b00101000
-	             , 0b00111100
-	             , 0b01111100
-	             , 0b01111111
-	             , 0b11111100
-	             , 0b00100010
-	             , 0b01000001
+		       0b00000000
+	             , 0b11000000
+	             , 0b11100000
+	             , 0b00010000
+	             , 0b00010000
+	             , 0b00010110
+	             , 0b01001001
+	             , 0b00110110
 
 # --- Map / tiles ---
 
@@ -1687,9 +1687,12 @@ camy_done_y:
 
 # --- Drawing helpers ---
 
+# register spilling hacks -- just spilling manually
+region worldYSpill 1;
+
 # Draw any acorn that lives on world tile (worldX,worldY),
 # at screen position (screenX,screenY).
-macro drawNutsAtCell(r worldX, r worldY, r screenX, r screenY) {
+macro drawNutsAtCell(r worldX, rw worldY, r screenX, r screenY) {
   # nutLimit = nutCounter
   getNutCounter nutLimit;
 
@@ -1712,7 +1715,9 @@ nut_body:
 
   # if nutY != worldY: continue
   set tmpY, nutY;
+  readMemConst worldYSpill, worldY;
   skipifeq tmpY, worldY;
+  writeMemConstReg worldYSpill, worldY;
   goto nut_next;
 
   # match: draw a nut sprite aligned to this tile
@@ -1735,7 +1740,7 @@ nut_done:
 # Convention:
 #   enemy slot 0..7   : rattlesnakes (spr_rattlesnake)
 #   enemy slot >= 8   : eagles      (spr_eagle)
-macro drawEnemiesAtCell(r worldX, r worldY, r screenX, r screenY) {
+macro drawEnemiesAtCell(r worldX, rw worldY, r screenX, r screenY) {
   # enemyLimit = enemyCounter
   getEnemyCounter enemyLimit;
 
@@ -1758,7 +1763,9 @@ enemy_body:
 
   # if ey != worldY: continue
   set tmpY, ey;
+  readMemConst worldYSpill, worldY;
   skipifeq tmpY, worldY;
+  writeMemConstReg worldYSpill, worldY;
   goto enemy_next;
 
   # Tile match: choose sprite based on slot index.
@@ -1862,8 +1869,10 @@ viewY_loop:
   shl screenY;          # *8
 
   # worldY = camY + viewY
+  readMemConst worldYSpill, worldY;
   set worldY, camY;
   add worldY, viewY;
+  writeMemConstReg worldYSpill, worldY;
 
   # Inner loop: viewX = 0..7
   setn viewX, 0;
@@ -1879,7 +1888,9 @@ viewX_loop:
   add worldX, viewX;
 
   # Get tile type
+  readMemConst worldYSpill, worldY;
   tileGetType worldX, worldY, tileType;
+  writeMemConstReg worldYSpill, worldY;
 
   # Skip air
   setn tmp, tileTAir;
@@ -1974,6 +1985,19 @@ macro writeMemConst(int memloc, int val) {
   setn v, val;
   setzero v;
   regdump ;
+}
+
+macro writeMemConstReg(int memloc, r val) {
+  seti memloc;
+  set v, val;
+  setzero v;
+  regdump ;
+}
+
+macro readMemConst(int memloc, w val) {
+  seti memloc;
+  regload ;
+  getzero val;
 }
 
 /*
