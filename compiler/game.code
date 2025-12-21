@@ -1692,7 +1692,7 @@ region worldYSpill 1;
 
 # Draw any acorn that lives on world tile (worldX,worldY),
 # at screen position (screenX,screenY).
-macro drawNutsAtCell(r worldX, r worldY, r screenX, r screenY) {
+macro drawNutsAtCell(r worldX, rw worldY, r screenX, r screenY) {
   # nutLimit = nutCounter
   getNutCounter nutLimit;
 
@@ -1717,7 +1717,7 @@ nut_body:
   set tmpY, nutY;
   readMemConst worldYSpill, worldY;
   skipifeq tmpY, worldY;
-  writeMemConst worldYSpill, worldY;
+  writeMemConstReg worldYSpill, worldY;
   goto nut_next;
 
   # match: draw a nut sprite aligned to this tile
@@ -1740,7 +1740,7 @@ nut_done:
 # Convention:
 #   enemy slot 0..7   : rattlesnakes (spr_rattlesnake)
 #   enemy slot >= 8   : eagles      (spr_eagle)
-macro drawEnemiesAtCell(r worldX, r worldY, r screenX, r screenY) {
+macro drawEnemiesAtCell(r worldX, rw worldY, r screenX, r screenY) {
   # enemyLimit = enemyCounter
   getEnemyCounter enemyLimit;
 
@@ -1765,7 +1765,7 @@ enemy_body:
   set tmpY, ey;
   readMemConst worldYSpill, worldY;
   skipifeq tmpY, worldY;
-  writeMemConst worldYSpill, worldY;
+  writeMemConstReg worldYSpill, worldY;
   goto enemy_next;
 
   # Tile match: choose sprite based on slot index.
@@ -1872,7 +1872,7 @@ viewY_loop:
   readMemConst worldYSpill, worldY;
   set worldY, camY;
   add worldY, viewY;
-  writeMemConst worldYSpill, worldY;
+  writeMemConstReg worldYSpill, worldY;
 
   # Inner loop: viewX = 0..7
   setn viewX, 0;
@@ -1890,7 +1890,7 @@ viewX_loop:
   # Get tile type
   readMemConst worldYSpill, worldY;
   tileGetType worldX, worldY, tileType;
-  writeMemConst worldYSpill, worldY;
+  writeMemConstReg worldYSpill, worldY;
 
   # Skip air
   setn tmp, tileTAir;
@@ -1917,10 +1917,8 @@ maybe_trunk:
 after_tile_sprite:
   # Draw things that sit on this tile.
   # worldX, worldY, screenX, screenY are already set by the loops.
-  readMemConst worldYSpill, worldY;
   drawNutsAtCell worldX, worldY, screenX, screenY;
   drawEnemiesAtCell worldX, worldY, screenX, screenY;
-  writeMemConst worldYSpill, worldY;
 
 viewX_next:
   addn viewX, 1;
@@ -1985,6 +1983,13 @@ macro readMem(r memloc, w val) {
 macro writeMemConst(int memloc, int val) {
   seti memloc;
   setn v, val;
+  setzero v;
+  regdump ;
+}
+
+macro writeMemConstReg(int memloc, r val) {
+  seti memloc;
+  set v, val;
   setzero v;
   regdump ;
 }
