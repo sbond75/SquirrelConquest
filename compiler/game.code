@@ -1907,7 +1907,6 @@ enemy_body:
   set tmpY, ey;
   readMemConstReg worldYSpill, worldY;
   skipifeq tmpY, worldY;
-  writeMemConstReg worldYSpill, worldY;
   goto enemy_next;
 
   # Tile match: choose sprite based on slot index.
