@@ -684,7 +684,9 @@ main = do
   --print userLines
   print allLines
   
-  let regs = fromRight' $ regAlloc (fst <$> chip8Instrs) allLines
+  let regs_ = regAlloc (fst <$> chip8Instrs) allLines
+  either print (const $ pure ()) regs_
+  let regs = fromRight' regs_
   putStrLn "register allocation:"
   print regs
   putStrLn "assembly:"
