@@ -1687,6 +1687,9 @@ camy_done_y:
 
 # --- Drawing helpers ---
 
+# register spilling hacks -- just spilling manually
+region worldYSpill 1;
+
 # Draw any acorn that lives on world tile (worldX,worldY),
 # at screen position (screenX,screenY).
 macro drawNutsAtCell(r worldX, r worldY, r screenX, r screenY) {
@@ -1712,7 +1715,9 @@ nut_body:
 
   # if nutY != worldY: continue
   set tmpY, nutY;
+  readMemConst worldYSpill, worldY;
   skipifeq tmpY, worldY;
+  writeMemConst worldYSpill, worldY;
   goto nut_next;
 
   # match: draw a nut sprite aligned to this tile
@@ -1758,7 +1763,9 @@ enemy_body:
 
   # if ey != worldY: continue
   set tmpY, ey;
+  readMemConst worldYSpill, worldY;
   skipifeq tmpY, worldY;
+  writeMemConst worldYSpill, worldY;
   goto enemy_next;
 
   # Tile match: choose sprite based on slot index.
@@ -1862,8 +1869,10 @@ viewY_loop:
   shl screenY;          # *8
 
   # worldY = camY + viewY
+  readMemConst worldYSpill, worldY;
   set worldY, camY;
   add worldY, viewY;
+  writeMemConst worldYSpill, worldY;
 
   # Inner loop: viewX = 0..7
   setn viewX, 0;
@@ -1879,7 +1888,9 @@ viewX_loop:
   add worldX, viewX;
 
   # Get tile type
+  readMemConst worldYSpill, worldY;
   tileGetType worldX, worldY, tileType;
+  writeMemConst worldYSpill, worldY;
 
   # Skip air
   setn tmp, tileTAir;
@@ -1906,8 +1917,10 @@ maybe_trunk:
 after_tile_sprite:
   # Draw things that sit on this tile.
   # worldX, worldY, screenX, screenY are already set by the loops.
+  readMemConst worldYSpill, worldY;
   drawNutsAtCell worldX, worldY, screenX, screenY;
   drawEnemiesAtCell worldX, worldY, screenX, screenY;
+  writeMemConst worldYSpill, worldY;
 
 viewX_next:
   addn viewX, 1;
@@ -1974,6 +1987,12 @@ macro writeMemConst(int memloc, int val) {
   setn v, val;
   setzero v;
   regdump ;
+}
+
+macro readMemConst(int memloc, w val) {
+  seti memloc;
+  regload ;
+  getzero val;
 }
 
 /*
