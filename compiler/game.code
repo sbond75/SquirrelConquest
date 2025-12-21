@@ -2103,6 +2103,275 @@ viewX_next:
   #drawPlayer tileX, tileY;
 }
 
+# --- Enemy AI ---
+
+# --- Small helpers for global counters ----------------------------------------
+
+macro getFrameCounter(w out) {
+  seti frameCounter;
+  regload;
+  getzero out;
+}
+
+macro setFrameCounter(r val) {
+  seti frameCounter;
+  setzero val;
+  regdump;
+}
+
+macro loadEnemyCounter(w out) {
+  seti enemyCounter;
+  regload;
+  getzero out;
+}
+
+# --- Compare in 0..31: is pos < target ? --------------------------------------
+# outIsLess = 1 if 0 <= pos < target <= 31, else 0
+
+macro isLess32(r pos, r target, w outIsLess) {
+  setn outIsLess, 0;
+
+  set tmp, pos;
+  addn tmp, 1;             # start from pos+1
+
+isLess32_loop:
+  # if tmp == target -> pos < target
+  set t, tmp;
+  skipifeq t, target;
+  goto isLess32_notMatch;
+  setn outIsLess, 1;
+  goto isLess32_done;
+
+isLess32_notMatch:
+  # if tmp == 31 -> stop (no match in (pos,31])
+  set t2, tmp;
+  setn maxVal, 31;
+  skipifeq t2, maxVal;
+  goto isLess32_advance;
+  goto isLess32_done;
+
+isLess32_advance:
+  addn tmp, 1;
+  goto isLess32_loop;
+
+isLess32_done:
+}
+
+# --- Enemy damage cooldown per slot -------------------------------------------
+# Interprets byte enemyDmgCounterOff as a cooldown:
+#   - If > 0, decrement each step.
+#   - When it reaches 0, re-enable canDamage.
+
+macro enemyCooldownStep(r idx) {
+  enemyGetDamageCounter idx, cd;
+  setn zeroCD, 0;
+  skipifeq cd, zeroCD;
+  goto cd_not_zero;
+  goto cd_done;
+
+cd_not_zero:
+  addn cd, 255;                 # cd = cd - 1
+  enemySetDamageCounter idx, cd;
+
+  set cdTmp, cd;
+  skipifeqn cdTmp, zeroCD;
+  goto cd_done;
+  # Just reached 0 -> re-enable damage
+  enemySetCanDamage idx;
+
+cd_done:
+}
+
+# --- Move enemy one tile towards player in tile space -------------------------
+# Uses only comparisons in 0..31 via isLess32 and clamps to map bounds.
+# idx : enemy index (0..enemyCounter-1)
+# ptx : player tileX
+# pty : player tileY
+
+macro moveEnemyTowardPlayer(r idx, r ptx, r pty) {
+  enemyGetTileX idx, ex;
+  enemyGetTileY idx, ey;
+
+  setn stepX, 0;
+  setn stepY, 0;
+
+  # ----- X axis -----
+  set xTmp, ex;
+  skipifeq xTmp, ptx;
+  goto x_not_equal;
+  goto y_axis;               # x already equal
+
+x_not_equal:
+  isLess32 ex, ptx, xIsLess;
+  set xFlag, xIsLess;
+  setn zeroFlag, 0;
+  skipifeq xFlag, zeroFlag;
+  goto x_posLess;
+  # pos > target -> stepX = -1
+  setn stepX, 255;
+  goto x_after_dir;
+
+x_posLess:
+  # pos < target -> stepX = +1
+  setn stepX, 1;
+
+x_after_dir:
+  # Clamp at left edge: if ex == 0 and stepX == -1 then stepX = 0
+  set xEdge, ex;
+  setn xMin, 0;
+  skipifeqn xEdge, xMin;
+  goto x_notMin;
+  set xStepChk, stepX;
+  setn negOne, 255;
+  skipifeq xStepChk, negOne;
+  goto x_notMin;
+  setn stepX, 0;
+x_notMin:
+  # Clamp at right edge: if ex == 31 and stepX == +1 then stepX = 0
+  set xEdge2, ex;
+  setn xMax, 31;
+  skipifeqn xEdge2, xMax;
+  goto y_axis;
+  set xStepChk2, stepX;
+  setn plusOne, 1;
+  skipifeq xStepChk2, plusOne;
+  goto y_axis;
+  setn stepX, 0;
+
+  # ----- Y axis -----
+y_axis:
+  set yTmp, ey;
+  skipifeq yTmp, pty;
+  goto y_not_equal;
+  goto do_move;              # y already equal
+
+y_not_equal:
+  isLess32 ey, pty, yIsLess;
+  set yFlag, yIsLess;
+  setn zeroYFlag, 0;
+  skipifeq yFlag, zeroYFlag;
+  goto y_posLess;
+  # pos > target -> stepY = -1
+  setn stepY, 255;
+  goto y_after_dir;
+
+y_posLess:
+  # pos < target -> stepY = +1
+  setn stepY, 1;
+
+y_after_dir:
+  # Clamp at top edge: if ey == 0 and stepY == -1 then stepY = 0
+  set yEdge, ey;
+  setn yMin, 0;
+  skipifeqn yEdge, yMin;
+  goto y_notMin;
+  set yStepChk, stepY;
+  setn negOneY, 255;
+  skipifeq yStepChk, negOneY;
+  goto y_notMin;
+  setn stepY, 0;
+y_notMin:
+  # Clamp at bottom edge: if ey == 31 and stepY == +1 then stepY = 0
+  set yEdge2, ey;
+  setn yMax, 31;
+  skipifeqn yEdge2, yMax;
+  goto do_move;
+  set yStepChk2, stepY;
+  setn plusOneY, 1;
+  skipifeq yStepChk2, plusOneY;
+  goto do_move;
+  setn stepY, 0;
+
+  # ----- Apply movement -----
+do_move:
+  set newX, ex;
+  set newY, ey;
+  add newX, stepX;
+  add newY, stepY;
+
+  enemySetTileX idx, newX;
+  enemySetTileY idx, newY;
+}
+
+# --- Try to damage player if on same tile -------------------------------------
+# Uses enemyCanDamage flag + damageCounter as cooldown.
+
+macro enemyTryDamagePlayer(r idx, r ptx, r pty) {
+  enemyGetTileX idx, ex;
+  enemyGetTileY idx, ey;
+
+  # Check tileX equality
+  set tx, ex;
+  set ptx2, ptx;
+  skipifeq tx, ptx2;
+  goto enemy_noDamage;
+
+  # Check tileY equality
+  set ty, ey;
+  set pty2, pty;
+  skipifeq ty, pty2;
+  goto enemy_noDamage;
+
+  # Same tile => can we damage?
+  enemyGetCanDamage idx, can;
+  setn zeroCan, 0;
+  skipifeq can, zeroCan;
+  goto enemy_doDamage;
+  goto enemy_noDamage;
+
+enemy_doDamage:
+  playerGetHp hp;
+  setn zeroHp, 0;
+  skipifeq hp, zeroHp;
+  goto enemy_hpNonZero;
+  goto enemy_setCooldown;
+
+enemy_hpNonZero:
+  addn hp, 255;             # hp = hp - 1
+  playerSetHp hp;
+
+enemy_setCooldown:
+  setn cdVal, 30;           # simple fixed cooldown
+  enemySetDamageCounter idx, cdVal;
+  enemyClearCanDamage idx;
+
+enemy_noDamage:
+}
+
+# --- Top-level level step: scr_level_step -------------------------------------
+# For now: update all enemies + frameCounter.
+# (Acorn logic and separate rattlesnake/eagle behaviors can be added later.)
+
+macro scr_level_step() {
+  # Player tile position
+  playerGetTileX ptx;
+  playerGetTileY pty;
+
+  # Enemy loop
+  loadEnemyCounter enemyCount;
+  setn ei, 0;
+
+enemy_loop:
+  set eiTmp, ei;
+  skipifeq eiTmp, enemyCount;
+  goto enemy_body;
+  goto enemies_done;
+
+enemy_body:
+  enemyCooldownStep ei;
+  moveEnemyTowardPlayer ei, ptx, pty;
+  enemyTryDamagePlayer ei, ptx, pty;
+
+  addn ei, 1;
+  goto enemy_loop;
+
+enemies_done:
+  # frameCounter++
+  getFrameCounter fc;
+  addn fc, 1;
+  setFrameCounter fc;
+}
+
 # --- Code --- =========================================================
 
 macro setir(r memloc) {
@@ -2372,8 +2641,15 @@ loop:
   playerSetTileX tx;
   playerSetTileY ty;
 
+  # Enemy AI step
+  scr_level_step;
+
   # Draw tiles around player + player sprite in view
   drawViewAroundPlayer tx, ty;
+
+  # Draw health
+  playerGetHp hp;
+  drawNum2 hp, 1, 1;
 
   # Simple frame pacing
   waitTicks 1;
