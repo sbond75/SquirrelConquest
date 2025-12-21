@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>CHIP-8</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        overflow: hidden;
+      }
+      /* the canvas *must not* have any border or padding, or mouse coords will be wrong */
+      canvas.emscripten {
+        border: 0px none;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+        width: 1024px;
+        height: 512px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+
+    <script type='text/javascript'>
+      /* https://css-tricks.com/snippets/javascript/get-url-variables/ */
+      function getQueryVariable(variable) {
+        var query = window.location.search.substring(1);
+        var vars = query.split("&");
+        for (var i=0;i<vars.length;i++) {
+           var pair = vars[i].split("=");
+           if(pair[0] == variable){return pair[1];}
+        }
+        return(false);
+      }
+
+      var Module = {
+        preRun: [],
+        postRun: [],
+        arguments: ["-f", getQueryVariable("foreground") || "#AAAAFF",
+                    "-b", getQueryVariable("background") || "#000055",
+                    getQueryVariable("game") || "GAMES/CUBE8.ch8"],
+        print: function(text) {
+          console.log(text);
+        },
+        printErr: function(text) {
+          console.error(text);
+        },
+        canvas: (function() {
+          var canvas = document.getElementById('canvas');
+          canvas.addEventListener("webglcontextlost", function(e) {
+            alert('WebGL context lost. You will need to reload the page.');
+            e.preventDefault();
+          }, false);
+          return canvas;
+        })(),
+        setStatus: function(text) {
+          // Status messages go to console only
+          if (text) console.log(text);
+        },
+        monitorRunDependencies: function(left) {
+          // Silent dependency monitoring
+        }
+      };
+
+      window.onerror = function(event) {
+        console.error('Exception thrown:', event);
+      };
+    </script>
+    <script async type="text/javascript" src="chip8.js"></script>
+  </body>
+</html>

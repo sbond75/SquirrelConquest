@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CHIP-8 Emulator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+        }
+        h1 {
+            text-align: center;
+            color: #4a9eff;
+        }
+        .container {
+            background-color: #2a2a2a;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        .game-frame {
+            width: 1024px;
+            height: 512px;
+            border: 3px solid #4a9eff;
+            border-radius: 5px;
+            background-color: #000;
+            display: block;
+            margin: 0 auto;
+        }
+        .info {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #333;
+            border-radius: 5px;
+            line-height: 1.6;
+        }
+        .info h2 {
+            color: #4a9eff;
+            margin-top: 0;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .control-item {
+            background-color: #444;
+            padding: 8px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>CHIP-8 Emulator</h1>
+
+    <div class="container">
+        <iframe src="chip8-minimal.html" class="game-frame" title="CHIP-8 Game"></iframe>
+
+        <div class="info">
+            <h2>Controls</h2>
+            <p>The CHIP-8 uses a 16-key hexadecimal keypad mapped to your keyboard:</p>
+            <div class="controls">
+                <div class="control-item">1 2 3 4 → 1 2 3 C</div>
+                <div class="control-item">Q W E R → 4 5 6 D</div>
+                <div class="control-item">A S D F → 7 8 9 E</div>
+                <div class="control-item">Z X C V → A 0 B F</div>
+            </div>
+
+            <h2>Debugger</h2>
+            <div class="controls">
+                <div class="control-item">F5 - Pause</div>
+                <div class="control-item">F6 - Step</div>
+                <div class="control-item">F8 - Resume</div>
+            </div>
+
+            <h2>About</h2>
+            <p>This is a CHIP-8 interpreter compiled to WebAssembly using Emscripten. CHIP-8 is an interpreted programming language developed in the 1970s for early microcomputers.</p>
+        </div>
+    </div>
+</body>
+</html>
