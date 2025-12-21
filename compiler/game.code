@@ -1,3 +1,109 @@
+# --- Fonts ---
+
+region font auto 0b01110,
+                 0b01010,
+                 0b01010,
+                 0b01010,
+                 0b01110,
+                 0, 0, 0,
+
+                 0b00010,
+                 0b00010,
+                 0b00010,
+                 0b00010,
+                 0b00010,
+                 0, 0, 0,
+
+                 0b01110,
+                 0b00010,
+                 0b01110,
+                 0b01000,
+                 0b01110,
+                 0, 0, 0,
+
+                 0b01110,
+                 0b00010,
+                 0b01110,
+                 0b00010,
+                 0b01110,
+                 0, 0, 0,
+
+                 0b01010,
+                 0b01010,
+                 0b01110,
+                 0b00010,
+                 0b00010,
+                 0, 0, 0,
+
+                 0b01110,
+                 0b01000,
+                 0b01110,
+                 0b00010,
+                 0b01110,
+                 0, 0, 0,
+
+                 0b01110,
+                 0b01000,
+                 0b01110,
+                 0b01010,
+                 0b01110,
+                 0, 0, 0,
+
+                 0b01110,
+                 0b00010,
+                 0b00010,
+                 0b00010,
+                 0b00010,
+                 0, 0, 0,
+
+                 0b01110,
+                 0b01010,
+                 0b01110,
+                 0b01010,
+                 0b01110,
+                 0, 0, 0,
+
+                 0b01110,
+                 0b01010,
+                 0b01110,
+                 0b00010,
+                 0b00010
+
+region bcdZone 3 # welcome to the bcd zone
+
+macro drawNum1(r num, r x, r y) {
+  seti font;
+  set offset, num;
+  shl offset;
+  shl offset;
+  shl offset;
+  addi offset;
+  draw x, y, 5;
+}
+
+macro drawNum2(r num, rw x, r y) {
+  seti bcdZone;
+  bcd num;
+  setn one, 1; # whatever man
+  addi one;
+  regload;
+  getzero n;
+  drawNum1 n, x, y;
+  addn x, 5;
+  seti bcdZone;
+  setn two, 2; # whatever man
+  addi two;
+  regload;
+  getzero n;
+  drawNum1 n, x, y;
+}
+
+macro drawNum(r num) {
+  setn x, 3;
+  setn y, 5;
+  drawNum2 num, x, y;
+}
+
 # --- Control flow helpers --- =========================================================
 
 macro ifNZ(r cond, macro() ifCase, macro() elseCase) {
@@ -1729,6 +1835,7 @@ region worldYSpill 1;
 macro drawNutsAtCell(r worldX, rw worldY, r screenX, r screenY) {
   # nutLimit = nutCounter
   getNutCounter nutLimit;
+  ## drawNum nutLimit;
 
   setn nutIdx, 0;
 nut_loop:
@@ -1751,11 +1858,12 @@ nut_body:
   set tmpY, nutY;
   readMemConstReg worldYSpill, worldY;
   skipifeq tmpY, worldY;
-  writeMemConstReg worldYSpill, worldY;
   goto nut_next;
 
   # match: draw a nut sprite aligned to this tile
   seti spr_nut;
+  ## setn screenX, 1;
+  ## setn screenY, 1;
   draw screenX, screenY, 8;
 
   # assume at most one nut per tile → break
@@ -1930,7 +2038,8 @@ viewX_loop:
   setn tmp, tileTAir;
   skipifeq tileType, tmp;
   goto non_air;
-  goto viewX_next;
+  #cursed: goto viewX_next;
+  goto after_tile_sprite;
 
 non_air:
   # Branch vs trunk
@@ -2122,7 +2231,7 @@ macro debugDrawCounters() {
   clear;
 
   # nutCounter: draw spr_nut at x = i*8, y = 0
-  getNutCounter nutCount;
+  getNutCounter nutCount; # FIXME: limit to 8 to prevent redrawing over same thing, showing nothing
   setn i, 0;
 debug_nut_loop:
   skipifeq i, nutCount;
@@ -2227,7 +2336,14 @@ macro main() {
   scr_levelgen_init;
 
 
-##   # Debug loop
+## ##   # Debug loop #
+## ##   ## setn idx, 0;
+## ##   ## nutGetTileY idx, x;
+## ##   ## drawNum x;
+
+##   getNutCounter nutCount;
+##   drawNum nutCount;
+
 ## lbl2:
 ##   ## setn L, nutCounter;             # length = n pixels
 ##   ## debugDrawLineLen L;    # draws an L-pixel horizontal line
@@ -2239,6 +2355,8 @@ macro main() {
 ##   debugDrawCounters;
 
 ## lbl:
+##   debugDrawCounters;
+##   waitTicks 1;
 ##   goto lbl;
 ##   # #
 
