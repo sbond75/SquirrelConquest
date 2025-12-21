@@ -395,7 +395,7 @@ regAlloc instrTypes l = execStateT (mapM_ handleReg regList) Map.empty where
     let allOverlaps = Set.delete reg $ fold $ catMaybes $ flip Map.lookup livenessPerLine <$> Set.toList allLines
     let allOverlapsHardware = Set.fromList $ catMaybes $ flip Map.lookup currentMap <$> Set.toList allOverlaps
     let hardwarePossibilities = Set.difference allRegs allOverlapsHardware
-    let errMsg = "Reg alloc failed for " <> reg <> "... allLines: " <> show allLines <> " allOverlaps: " <> show allOverlaps
+    let errMsg = "Reg alloc failed for " <> reg <> "... allLines: " <> show ((l !!) <$> Set.toList allLines) <> " allOverlaps: " <> show allOverlaps
     hardware <- lift $ maybe (Left errMsg) pure $ Set.lookupMin hardwarePossibilities
     modify (Map.insert reg hardware)
 
