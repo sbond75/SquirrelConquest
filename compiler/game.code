@@ -1749,7 +1749,7 @@ nut_body:
 
   # if nutY != worldY: continue
   set tmpY, nutY;
-  readMemConst worldYSpill, worldY;
+  readMemConstReg worldYSpill, worldY;
   skipifeq tmpY, worldY;
   writeMemConstReg worldYSpill, worldY;
   goto nut_next;
@@ -1797,7 +1797,7 @@ enemy_body:
 
   # if ey != worldY: continue
   set tmpY, ey;
-  readMemConst worldYSpill, worldY;
+  readMemConstReg worldYSpill, worldY;
   skipifeq tmpY, worldY;
   writeMemConstReg worldYSpill, worldY;
   goto enemy_next;
@@ -1903,7 +1903,7 @@ viewY_loop:
   shl screenY;          # *8
 
   # worldY = camY + viewY
-  readMemConst worldYSpill, worldY;
+  readMemConstReg worldYSpill, worldY;
   set worldY, camY;
   add worldY, viewY;
   writeMemConstReg worldYSpill, worldY;
@@ -1922,7 +1922,7 @@ viewX_loop:
   add worldX, viewX;
 
   # Get tile type
-  readMemConst worldYSpill, worldY;
+  readMemConstReg worldYSpill, worldY;
   tileGetType worldX, worldY, tileType;
   writeMemConstReg worldYSpill, worldY;
 
@@ -2028,7 +2028,7 @@ macro writeMemConstReg(int memloc, r val) {
   regdump ;
 }
 
-macro readMemConst(int memloc, w val) {
+macro readMemConstReg(int memloc, w val) {
   seti memloc;
   regload ;
   getzero val;
