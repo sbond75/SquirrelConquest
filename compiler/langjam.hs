@@ -17,13 +17,13 @@ import qualified Data.UUID as UUID
 import Control.DeepSeq (deepseq)
 import Control.Arrow (first, second)
 import Data.Foldable (fold)
-import Control.Monad (when, void)
+import Control.Monad (when, void, zipWithM)
 import Data.Word (Word32, Word8)
 import Data.Bits (shiftL, shiftR, (.|.), (.&.))
 import Control.Monad.Writer (Writer, runWriter, tell)
 import Numeric (showHex)
 import qualified Data.ByteString as BS
-import Data.List (mapAccumL)
+import Data.List (mapAccumL, sortOn)
 import Control.Exception (assert)
 import qualified Data.Text.IO as TIO
 import System.Environment (getArgs)
@@ -324,6 +324,47 @@ inlineMacroFromCode builtins excl code = inlineMacroFromCodeMap builtins excl ma
 codeToLines :: (VarGen m, Monad m) => Set.Set String -> Set.Set String -> Code -> m [Line]
 codeToLines builtins excl code = inlineMacroFromCode builtins excl code "main" []
 
+-- Begin spilling --
+data RegAllocInfo = RegAllocInfo
+  { raiReadWrites       :: Map.Map String (Set.Set Int, Set.Set Int)
+  , raiLineToReads      :: Map.Map Int (Set.Set String)
+  , raiLineToWrites     :: Map.Map Int (Set.Set String)
+  , raiTargets          :: Map.Map Int (Set.Set Int)
+  , raiSources          :: Map.Map Int (Set.Set Int)
+  , raiInterestsPerLine :: Map.Map Int (Set.Set String)
+  , raiLivenessPerLine  :: Map.Map Int (Set.Set String)
+  , raiRegLivenesses    :: Map.Map String (Set.Set Int)
+  } deriving (Show)
+
+regAllocInfo
+  :: Map.Map String ([ArgType], Maybe (Set.Set Int))
+  -> [Line]
+  -> RegAllocInfo
+regAllocInfo instrTypes l =
+  RegAllocInfo
+    { raiReadWrites       = readWrites
+    , raiLineToReads      = lineToReads
+    , raiLineToWrites     = lineToWrites
+    , raiTargets          = targets
+    , raiSources          = sources
+    , raiInterestsPerLine = interestsPerLine
+    , raiLivenessPerLine  = livenessPerLine
+    , raiRegLivenesses    = regLivenesses
+    }
+  where
+    readWrites   = regAllocGatherReadWrites (fst <$> instrTypes) l
+    lineToReads  = invertGraph $ fst <$> readWrites
+    lineToWrites = invertGraph $ snd <$> readWrites
+    targets      = computeTargets instrTypes l
+    sources      = invertGraph targets
+    interestsPerLine =
+      regAllocGetInterestsPerLine
+        lineToReads lineToWrites sources targets (length l)
+    livenessPerLine =
+      Map.unionsWith (<>) [interestsPerLine, lineToReads, lineToWrites]
+    regLivenesses = invertGraph livenessPerLine
+-- End spilling --
+
 regAllocGatherReadWrites :: Map.Map String [ArgType] -> [Line] -> Map.Map String (Set.Set Int, Set.Set Int)
 regAllocGatherReadWrites instrTypes l = snd $ execState (mapM_ helper l) (0, Map.empty) where
   helper (InstrLine (Instr {..})) = do
@@ -377,27 +418,173 @@ invertGraph :: (Ord a, Ord b) => Map.Map a (Set.Set b) -> Map.Map b (Set.Set a)
 invertGraph = Map.unionsWith (<>) . fmap helper . Map.toList where
   helper (x, ys) = Map.fromList $ zip (Set.toList ys) $ fmap Set.singleton $ repeat x
 
-regAlloc :: Map.Map String ([ArgType], Maybe (Set.Set Int)) -> [Line] -> Either String (Map.Map String HardwareRegister)
-regAlloc instrTypes l = execStateT (mapM_ handleReg regList) Map.empty where
-  readWrites = regAllocGatherReadWrites (fst <$> instrTypes) l
-  lineToReads = invertGraph $ fst <$> readWrites
-  lineToWrites = invertGraph $ snd <$> readWrites
-  targets = computeTargets instrTypes l
-  sources = invertGraph targets
-  interestsPerLine = regAllocGetInterestsPerLine lineToReads lineToWrites sources targets (length l)
-  livenessPerLine = Map.unionsWith (<>) [interestsPerLine, lineToReads, lineToWrites]
-  regLivenesses = invertGraph livenessPerLine
-  regList = Map.keys readWrites -- TODO minor hack
-  allRegs = Set.fromList [V1 .. VE]
-  handleReg reg = do
-    currentMap <- get
-    let allLines = fromMaybe Set.empty $ Map.lookup reg regLivenesses
-    let allOverlaps = Set.delete reg $ fold $ catMaybes $ flip Map.lookup livenessPerLine <$> Set.toList allLines
-    let allOverlapsHardware = Set.fromList $ catMaybes $ flip Map.lookup currentMap <$> Set.toList allOverlaps
-    let hardwarePossibilities = Set.difference allRegs allOverlapsHardware
-    let errMsg = "Reg alloc failed for " <> reg <> "... allLines: " <> show ((l !!) <$> Set.toList allLines) <> " allOverlaps: " <> show allOverlaps
-    hardware <- lift $ maybe (Left errMsg) pure $ Set.lookupMin hardwarePossibilities
-    modify (Map.insert reg hardware)
+-- Begin spilling --
+regAlloc
+  :: Map.Map String ([ArgType], Maybe (Set.Set Int))
+  -> [Line]
+  -> Either String (Map.Map String HardwareRegister)
+regAlloc instrTypes l = execStateT (mapM_ handleReg regList) Map.empty
+  where
+    RegAllocInfo{..} = regAllocInfo instrTypes l
+
+    readWrites      = raiReadWrites
+    livenessPerLine = raiLivenessPerLine
+    regLivenesses   = raiRegLivenesses
+
+    regList = Map.keys readWrites          -- as before
+
+    allRegs = Set.fromList [V1 .. VE]      -- keep your existing choice
+
+    handleReg reg = do
+      currentMap <- get
+      let allLines = fromMaybe Set.empty $ Map.lookup reg regLivenesses
+      let allOverlaps =
+            Set.delete reg
+            $ fold
+            $ catMaybes
+            $ flip Map.lookup livenessPerLine <$> Set.toList allLines
+      let allOverlapsHardware =
+            Set.fromList $ catMaybes
+            $ flip Map.lookup currentMap <$> Set.toList allOverlaps
+      let hardwarePossibilities = Set.difference allRegs allOverlapsHardware
+      let errMsg =
+            "Reg alloc failed for " <> reg
+            <> "... allLines: " <> show allLines
+            <> " allOverlaps: " <> show allOverlaps
+      hardware <- lift $ maybe (Left errMsg) pure $ Set.lookupMin hardwarePossibilities
+      modify (Map.insert reg hardware)
+
+maxLiveAtOnce :: RegAllocInfo -> Int
+maxLiveAtOnce RegAllocInfo{..} =
+  maximum (0 : map Set.size (Map.elems raiLivenessPerLine))
+
+-- Reserve names starting with "__" for internal stuff like __regtmp
+isInternalVar :: String -> Bool
+isInternalVar v = take 2 v == "__"
+
+chooseSpills
+  :: Int              -- number of hardware registers available
+  -> RegAllocInfo
+  -> Set.Set String   -- spilled virtual variables
+chooseSpills hwCount info@RegAllocInfo{..}
+  | maxLiveAtOnce info <= hwCount =
+      Set.empty
+  | otherwise =
+      let -- score by liveness length as a basic heuristic
+          scores :: [(String, Int)]
+          scores =
+            [ (v, Set.size liveLines)
+            | (v, liveLines) <- Map.toList raiRegLivenesses
+            , not (isInternalVar v)
+            ]
+          sortedByScore = map fst $ sortOn snd scores
+          toKeep        = Set.fromList (take hwCount sortedByScore)
+          allVars       = Set.fromList (map fst scores)
+          toSpill       = Set.difference allVars toKeep
+      in toSpill
+
+spillSlotName :: String -> String
+spillSlotName v = "__spill_slot_" ++ v
+
+insertSpills
+  :: (VarGen m, Monad m)
+  => Map.Map String ([ArgType], Maybe (Set.Set Int)) -- instruction types
+  -> Set.Set String                                  -- spilled virtual vars
+  -> [Line]
+  -> m [Line]
+insertSpills instrTypes spilled =
+  fmap concat . mapM rewriteLine
+  where
+    rewriteLine :: (VarGen m, Monad m) => Line -> m [Line]
+    rewriteLine (LabelLine l) = pure [LabelLine l]
+    rewriteLine (InstrLine instr@(Instr name args)) =
+      case Map.lookup name instrTypes of
+        Nothing -> pure [InstrLine instr]
+        Just (argTypes, _) -> do
+          (pres, newArgs, posts) <- unzip3
+                                  <$> zipWithM rewriteArg argTypes args
+          let instr' = instr { instrArgs = newArgs }
+          pure (concat pres ++ [InstrLine instr'] ++ concat posts)
+
+    rewriteArg
+      :: (VarGen m, Monad m)
+      => ArgType -> Expr -> m ([Line], Expr, [Line])
+    rewriteArg IntArg e         = pure ([], e, [])
+    rewriteArg LabelArg e       = pure ([], e, [])
+    rewriteArg (MacroValArg _) e = pure ([], e, [])
+
+    rewriteArg RArg e           = rewriteRead e
+    rewriteArg WArg e           = rewriteWrite e
+    rewriteArg RWArg e          = rewriteReadWrite e
+
+    rewriteRead :: (VarGen m, Monad m) => Expr -> m ([Line], Expr, [Line])
+    rewriteRead (VarExpr v)
+      | v `Set.member` spilled = do
+          t <- genVar (v ++ "_spill")
+          let addrSym = VarExpr (spillSlotName v)
+          let pre =
+                [ InstrLine (Instr "seti"    [addrSym])
+                , InstrLine (Instr "regload" [])
+                , InstrLine (Instr "getzero" [VarExpr t])
+                ]
+          pure (pre, VarExpr t, [])
+    rewriteRead e =
+      pure ([], e, [])
+
+    rewriteWrite :: (VarGen m, Monad m) => Expr -> m ([Line], Expr, [Line])
+    rewriteWrite (VarExpr v)
+      | v `Set.member` spilled = do
+          t <- genVar (v ++ "_spill")
+          let addrSym = VarExpr (spillSlotName v)
+          let post =
+                [ InstrLine (Instr "seti"    [addrSym])
+                , InstrLine (Instr "setzero" [VarExpr t])
+                , InstrLine (Instr "regdump" [])
+                ]
+          pure ([], VarExpr t, post)
+    rewriteWrite e =
+      pure ([], e, [])
+
+    rewriteReadWrite :: (VarGen m, Monad m) => Expr -> m ([Line], Expr, [Line])
+    rewriteReadWrite (VarExpr v)
+      | v `Set.member` spilled = do
+          t <- genVar (v ++ "_spill")
+          let addrSym = VarExpr (spillSlotName v)
+          let pre =
+                [ InstrLine (Instr "seti"    [addrSym])
+                , InstrLine (Instr "regload" [])
+                , InstrLine (Instr "getzero" [VarExpr t])
+                ]
+          let post =
+                [ InstrLine (Instr "seti"    [addrSym])
+                , InstrLine (Instr "setzero" [VarExpr t])
+                , InstrLine (Instr "regdump" [])
+                ]
+          pure (pre, VarExpr t, post)
+    rewriteReadWrite e =
+      pure ([], e, [])
+
+highestUsedNoSpill
+  :: Int                          -- firstDataAddr
+  -> Map.Map String Int           -- regionAddr
+  -> Map.Map String Region        -- regionMap
+  -> Int
+highestUsedNoSpill firstDataAddr regionAddr regionMap =
+  maybe firstDataAddr
+        (\(name, addr) ->
+           case Map.lookup name regionMap of
+             Just reg -> addr + fromIntegral (regionSize reg)
+             Nothing  -> firstDataAddr)
+        (Map.lookupMax regionAddr)
+
+buildSpillAddrMap
+  :: Int                -- base address for spills (after regions)
+  -> Set.Set String     -- spilled vars
+  -> Map.Map String Int -- spillSlotName v -> address
+buildSpillAddrMap base spilled =
+  Map.fromList $
+    zip (map spillSlotName (Set.toList spilled)) [base ..]
+-- End spilling --
 
 class Assembler m where
   emitInstr :: String -> [Either HardwareRegister Int] -> m ()
@@ -422,7 +609,7 @@ assignRegions start regions =
       let addr' = addr + size
       in (addr', (name, addr))
 
--- Region initializer injection --
+-- Begin region initializer injection --
 regionInitInstrCount :: Map.Map String Region -> Int
 regionInitInstrCount regionMap =
   sum [ 4 * length (regionInit r) | r <- Map.elems regionMap ]
@@ -453,8 +640,9 @@ regionInitLines regionAddr regionMap =
       , InstrLine (Instr "setzero"[VarExpr tmpVar])
       , InstrLine (Instr "regdump" [])
       ]
--- --
+-- End region initializer injection --
 
+-- Begin spilling --
 -- TODO endianness
 assembleLine
   :: (Assembler m, Monad m)
@@ -462,29 +650,50 @@ assembleLine
   -> Map.Map String Int               -- label -> instruction index
   -> (Int -> Int)                     -- label -> address
   -> Map.Map String Int               -- region name -> region addr
-  -> Map.Map String Const             -- constant name -> constant value
+  -> Map.Map String Int               -- spill slot name -> spill addr
+  -> Map.Map String Const             -- constants
   -> Instr
   -> m ()
-assembleLine regAllocs labels labelToAddr regionAddr consts (Instr {..}) =
+assembleLine regAllocs labels labelToAddr regionAddr spillAddr consts (Instr {..}) =
   emitInstr instrName (map processArg instrArgs)
   where
     processArg :: Expr -> Either HardwareRegister Int
     processArg (NumLit n) = Right n
     processArg (VarExpr v) =
-      case (Map.lookup v regAllocs, Map.lookup v labels, Map.lookup v regionAddr, Map.lookup v consts) of
+      case ( Map.lookup v regAllocs
+           , Map.lookup v labels
+           , Map.lookup v regionAddr
+           , Map.lookup v spillAddr
+           , Map.lookup v consts
+           ) of
         -- Variable that was given a hardware register
-        (Just reg, _, _, _) -> Left reg
+        (Just reg, _, _, _, _) -> Left reg
         -- Label: convert from instruction index to RAM address
-        (_, Just n, _, _)   -> Right (labelToAddr n)
-        -- Region: find an assigned address
-        (_, _, Just r, _)   -> Right (lookupOrDie "region addresses" regionAddr v)
-        -- Const: find a constant value
-        (_, _, _, Just c)   -> Right (constValue $ lookupOrDie "constants" consts v)
-        -- Should not happen if your macros are well-formed
-        _             -> error ("Unknown variable/label: " ++ v)
+        (_, Just n, _, _, _)   -> Right (labelToAddr n)
+        -- Region base address
+        (_, _, Just r, _, _)   -> Right r
+        -- Spill slot base address
+        (_, _, _, Just s, _)   -> Right s
+        -- Const: value
+        (_, _, _, _, Just c)   -> Right (constValue c)
+        -- Should not happen if everything is wired correctly
+        _ -> error ("Unknown variable/label: " ++ v)
+    processArg (MacroExpr _) =
+      error "MacroExpr should not reach assembleLine"
 
-assemble :: (Assembler m, Monad m) => Map.Map String HardwareRegister -> [Line] -> (Int -> Int) -> Map.Map String Int -> Map.Map String Const -> m ()
-assemble regAllocs lines labelToAddr regionAddr consts = let (instrs, labels) = splitLines lines in mapM_ (assembleLine regAllocs labels labelToAddr regionAddr consts) instrs
+assemble
+  :: (Assembler m, Monad m)
+  => Map.Map String HardwareRegister
+  -> [Line]
+  -> (Int -> Int)
+  -> Map.Map String Int            -- regionAddr
+  -> Map.Map String Int            -- spillAddr
+  -> Map.Map String Const
+  -> m ()
+assemble regAllocs lines labelToAddr regionAddr spillAddr consts =
+  let (instrs, labels) = splitLines lines
+  in mapM_ (assembleLine regAllocs labels labelToAddr regionAddr spillAddr consts) instrs
+-- End spilling --
 
 typecheckMacro :: Map.Map String ArgType -> Macro -> Either String ()
 typecheckMacro outerVars (Macro{..}) = mapM_ (uncurry doLine) (zip [1..] macroBody) where
@@ -637,6 +846,27 @@ main = do
   print $ mapM_ (\(n,d) -> mapLeft (("Macro " <> n <> ": ") <>) $ typecheckMacro (Map.union chip8Types $ Map.union regionsTypes $ Map.union constsTypes codeMacroTypes) d) [(n,d) | DeclMacro n d <- codeDecls parsedCode] -- TODO check that we don't overwrite builtins. also more generally check that stuff doesnt overwrite other stuff
   g <- getStdGen
   let userLines = evalRand (codeToLines (Set.fromList $ Map.keys chip8Instrs) (Set.fromList ([declRegionName d | DeclRegion d <- codeDecls parsedCode] ++ [ declConstName  c | DeclConst  c <- codeDecls parsedCode ])) parsedCode) g
+
+  -- Begin spilling --
+  let instrTypes :: Map.Map String ([ArgType], Maybe (Set.Set Int))
+      instrTypes = fst <$> chip8Instrs
+
+  -- First analysis: only on user code
+  let raInfoUser = regAllocInfo instrTypes userLines
+  let hwRegCount = Set.size (Set.fromList [V1 .. VE])
+
+  let spilledVars = chooseSpills hwRegCount raInfoUser
+  putStrLn "spilled vars:"
+  print spilledVars
+
+  -- Rewrite user code to insert loads/stores for spilled vars
+  let userLinesSpilled =
+        evalRand (insertSpills instrTypes spilledVars userLines) g
+
+  putStrLn "user lines after spilling:"
+  print userLinesSpilled
+  -- End spilling --
+  
   putStrLn "region decls:"
   print $ [d | DeclRegion d <- codeDecls parsedCode]
   putStrLn "const decls:"
@@ -669,16 +899,30 @@ main = do
       
   putStrLn "region addresses:"
   print $ Map.toList regionAddr
+
+  -- Begin spilling --
+  -- Where to start spill slots: directly after regions
+  let highestNoSpill = highestUsedNoSpill firstDataAddr regionAddr regionMap
+  let spillAddr :: Map.Map String Int
+      spillAddr = buildSpillAddrMap highestNoSpill spilledVars
+
+  putStrLn "spill slot addresses:"
+  print $ Map.toList spillAddr
+  -- End spilling --
   
   -- Instruction index -> byte address
   let labelToAddr :: Int -> Int
-      labelToAddr n = programStart + instrSizeBytes * n -- instructions are 2 bytes long
+      labelToAddr n = programStart + instrSizeBytes * n -- instructions are 2 bytes long in vanilla chip8, 3 in chip83
   
   -- Actual init code to run before user code
   let initLines :: [Line]
       initLines = regionInitLines regionAddr regionMap
+  -- let allLines :: [Line]
+  --     allLines = initLines ++ userLines
+  -- Begin spilling --
   let allLines :: [Line]
-      allLines = initLines ++ userLines
+      allLines = initLines ++ userLinesSpilled
+  -- End spilling --
       
   putStrLn "inlined:"
   --print userLines
@@ -691,7 +935,7 @@ main = do
   print regs
   putStrLn "assembly:"
   
-  let assembly = assemble regs allLines labelToAddr regionAddr constMap
+  let assembly = assemble regs allLines labelToAddr regionAddr spillAddr constMap
           
   print $ runAssemblerBase $ assembly
   putStrLn "total instruction count:"
@@ -707,14 +951,22 @@ main = do
   putStrLn "end address of machine code:"
   let endInstructionsAddr = programStart + machineLen
   print $ endInstructionsAddr
+  -- putStrLn "end address of last region (highest memory used):"
+  -- let highestUsed = maybe endInstructionsAddr
+  --           (\(name, addr) ->
+  --              case Map.lookup name regionMap of
+  --                Just extra -> addr + (fromIntegral $ regionSize extra)
+  --                Nothing    -> endInstructionsAddr)
+  --           (Map.lookupMax regionAddr)
+  -- print $ highestUsed
+  -- Begin spilling --
   putStrLn "end address of last region (highest memory used):"
-  let highestUsed = maybe endInstructionsAddr
-            (\(name, addr) ->
-               case Map.lookup name regionMap of
-                 Just extra -> addr + (fromIntegral $ regionSize extra)
-                 Nothing    -> endInstructionsAddr)
-            (Map.lookupMax regionAddr)
-  print $ highestUsed
+  let highestUsedWithSpills =
+        if Set.null spilledVars
+          then highestNoSpill
+          else highestNoSpill + Set.size spilledVars
+  print highestUsedWithSpills
+  -- End spilling --
   assert (totalInstrCount * instrSizeBytes == machineLen) (pure ())
   BS.writeFile "game.ch8" $ BS.pack machine
   putStrLn "wrote file"
