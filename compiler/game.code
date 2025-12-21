@@ -1194,6 +1194,9 @@ tree_done:
   # Use the same center we just used for tree exclusion
   spawnAcorns numNuts, 16, 16;
 
+  ## setn L, nutCounter;             # length = n pixels
+  ## debugDrawLineLen L;    # draws an L-pixel horizontal line
+
   # --- 3. Place enemies ----------------------------------------------
 
   # Example target counts: 8 rattlesnakes, then up to 16 total with eagles.
@@ -1264,6 +1267,37 @@ nut_nonbranch_skip_store:
 
 nut_try_done:
 }
+
+
+## # Debug: try to place a nut on (mx, my) deterministically.
+## # Fills nut slots up to max; no random chance, no center exclusion.
+## macro trySpawnSingleNutAt(r mx, r my, int centerX, int centerY) {
+##   # Get tile type at (mx, my)
+##   tileGetType mx, my, tileType;
+
+##   # Skip trunks (no nuts on trunks)
+##   set tt, tileType;
+##   setn tTrunk, tileTTrunk;
+##   skipifeq tt, tTrunk;
+##   goto nut_not_trunk;
+##   goto nut_try_done;
+
+## nut_not_trunk:
+##   # Allocate next nut slot; if none left, bail
+##   allocNutSlot nutIdx, nutOk;
+##   setn oneNut, 1;
+##   skipifeq nutOk, oneNut;
+##   goto nut_try_done;
+
+##   # Store tile coordinates and clear flags
+##   nutSetTileX nutIdx, mx;
+##   nutSetTileY nutIdx, my;
+##   setn flagsN, 0;
+##   nutSetFlags nutIdx, flagsN;
+
+## nut_try_done:
+## }
+
 
 # Spawn acorns up to 'lim' (target nutCounter) around the map,
 # using branch/non-branch chances.
@@ -2082,13 +2116,132 @@ wait_loop:
   goto wait_loop;      # if t != 0, keep waiting
 }
 
+# Debug: draw small “bars” at top row showing nut/enemy counts.
+# It ignores camera and just uses screen space directly.
+macro debugDrawCounters() {
+  clear;
+
+  # nutCounter: draw spr_nut at x = i*8, y = 0
+  getNutCounter nutCount;
+  setn i, 0;
+debug_nut_loop:
+  skipifeq i, nutCount;
+  goto debug_nut_body;
+  goto debug_enemy_part;
+
+debug_nut_body:
+  set x, i;
+  shl x; shl x; shl x;   # x *= 8
+  setn y, 0;
+  seti spr_nut;
+  draw x, y, 8;
+
+  addn i, 1;
+  goto debug_nut_loop;
+
+debug_enemy_part:
+  # enemyCounter: draw spr_rattlesnake at x = i*8, y = 8
+  getEnemyCounter enemyCount;
+  setn j, 0;
+debug_enemy_loop:
+  skipifeq j, enemyCount;
+  goto debug_enemy_body;
+  goto debug_done;
+
+debug_enemy_body:
+  set x2, j;
+  shl x2; shl x2; shl x2;  # x2 *= 8
+  setn y2, 8;
+  seti spr_rattlesnake;
+  draw x2, y2, 8;
+
+  addn j, 1;
+  goto debug_enemy_loop;
+
+debug_done:
+}
+
+region debugDrawLineLenStorage 1;
+
+# Draw a horizontal line of length LEN (0..8) at fixed position (10,10).
+# LEN is a register argument.
+macro debugDrawLineLen(r len) {
+  # Build bit pattern in 'pattern':
+  #   pattern = (11111111b >> (8 - len))
+  # Implemented as: start with pattern=0, bit=128, and set 'len' bits.
+  setn pattern, 0;     # pattern = 0
+  setn bit, 128;       # bit = 0b10000000
+  set remaining, len;  # remaining = len
+
+dbg_line_loop:
+  # if remaining == 0, stop
+  skipifeqn remaining, 0;
+  goto dbg_line_body;
+  goto dbg_line_done_pattern;
+
+dbg_line_body:
+  # pattern |= bit
+  bor pattern, bit;
+
+  # bit >>= 1
+  shr bit;
+
+  # remaining--
+  addn remaining, 255;  # remaining = remaining - 1
+
+  goto dbg_line_loop;
+
+dbg_line_done_pattern:
+  # Store pattern into memory at I = debugDrawLineLenStorage
+  seti debugDrawLineLenStorage;
+  setzero pattern;
+  regdump;              # writes V0 (pattern) to [I]
+
+  # Draw 1-row sprite at (10,10)
+  setn x, 10;
+  setn y, 10;
+  draw x, y, 1;
+}
+
+macro debugDrawLine() {
+  seti debugDrawLineLenStorage;
+  setn s, 7;
+  setzero s;
+  regdump;
+  setn x, 10;
+  setn y, 10;
+  draw x, y, 10;
+  ## loop:
+  ## goto loop;
+}
+
+
 macro main() {
+  debugDrawLine;
+
   scr_level_init;
 
   # Initialise player struct as per GML (tileX=15, tileY=15, hp=3, etc.)
   playerInit;
 
   scr_levelgen_init;
+
+
+##   # Debug loop
+## lbl2:
+##   ## setn L, nutCounter;             # length = n pixels
+##   ## debugDrawLineLen L;    # draws an L-pixel horizontal line
+##   goto lbl2;
+##   # #
+
+
+##   # Debug toggle #
+##   debugDrawCounters;
+
+## lbl:
+##   goto lbl;
+##   # #
+
 
   # Load tile pos into working registers
   playerGetTileX tx;
