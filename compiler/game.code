@@ -1475,6 +1475,10 @@ rs_not_excluded:
     enemySetMoveCounter eIdxRS, zeroRS;
     enemySetCanDamage eIdxRS;
 
+    # Inside spawn_rattlesnakes, after you successfully allocate enemy slot `eIdx`:
+    setn tType, enemyTypeRattlesnake;
+    enemySetType eIdx, tType;
+
 rs_skip_store:
   };
 
@@ -1559,6 +1563,10 @@ re_not_excluded:
     enemySetMoveCounter eIdxRE, zeroRE;
     enemySetCanDamage eIdxRE;
 
+    # Inside spawn_eagles, after allocation:
+    setn tType, enemyTypeEagle;
+    enemySetType eIdx, tType;
+
 re_branch_skip_store:
   };
   goto re_try_done;
@@ -1578,6 +1586,10 @@ re_nonbranch:
     enemySetDamageCounter eIdxREN, zeroREN;
     enemySetMoveCounter eIdxREN, zeroREN;
     enemySetCanDamage eIdxREN;
+
+    # Inside spawn_eagles, after allocation:
+    setn tType, enemyTypeEagle;
+    enemySetType eIdx, tType;
 
 re_nonbranch_skip_store:
   };
@@ -1829,6 +1841,7 @@ camy_done_y:
 
 # register spilling hacks -- just spilling manually
 region worldYSpill 1;
+region sameTileSpill 1;
 
 # Draw any acorn that lives on world tile (worldX,worldY),
 # at screen position (screenX,screenY).
@@ -2103,6 +2116,29 @@ viewX_next:
   #drawPlayer tileX, tileY;
 }
 
+# --- Enemy type (per slot) ----------------------------------------------------
+
+const enemyTypeNone        0;
+const enemyTypeRattlesnake 1;
+const enemyTypeEagle       2;
+
+# One byte per enemy slot, parallel to enemySlots
+region enemyType 64; #numEnemies;
+
+macro enemyGetType(r idx, w outType) {
+  seti enemyType;
+  addi idx;
+  regload;
+  getzero outType;
+}
+
+macro enemySetType(r idx, r inType) {
+  seti enemyType;
+  addi idx;
+  setzero inType;
+  regdump;
+}
+
 # --- Enemy AI ---
 
 # --- Small helpers for global counters ----------------------------------------
@@ -2155,6 +2191,140 @@ isLess32_advance:
   goto isLess32_loop;
 
 isLess32_done:
+}
+
+# --- absDiff32: |a - b| for 0..31 -------------------------------------------
+
+macro absDiff32(r a, r b, w out) {
+  # If a < b: out = b - a, else out = a - b
+
+  isLess32 a, b, aLessB;
+  setn out, 0;
+
+  set f, aLessB;
+  setn zeroF, 0;
+  skipifeq f, zeroF;
+  goto abs_aLess;
+  # a >= b
+  set out, a;
+  set tmp, b;
+  sub out, tmp;
+  goto abs_done;
+
+abs_aLess:
+  set out, b;
+  set tmp2, a;
+  sub out, tmp2;
+
+abs_done:
+}
+
+# --- Proximity flags ---------------------------------------------------------
+# dxAbs, dyAbs in 0..31
+# near1  = 1 if |dx| <= 1 AND |dy| <= 1 (Chebyshev <= 1)
+# near2  = 1 if |dx| <= 2 AND |dy| <= 2 (Chebyshev <= 2)
+# sameTile = 1 if dxAbs == 0 AND dyAbs == 0
+
+
+
+macro computeProximityFlags(r dxAbs, r dyAbs, w near1, w near2, w sameTile) {
+  # sameTile
+  readMemConstReg sameTileSpill, sameTile;
+  setn sameTile, 0;
+  writeMemConstReg sameTileSpill, sameTile;
+  set t1, dxAbs;
+  setn zero, 0;
+  skipifeq t1, zero;
+  goto not_same_x;
+  set t2, dyAbs;
+  skipifeq t2, zero;
+  goto not_same_y;
+  readMemConstReg sameTileSpill, sameTile;
+  setn sameTile, 1;
+  writeMemConstReg sameTileSpill, sameTile;
+  goto same_done;
+
+not_same_x:
+not_same_y:
+same_done:
+
+  # near1: dxAbs <= 1 and dyAbs <= 1
+  setn near1, 0;
+
+  # dxAbs <= 1 ?
+  set tDx, dxAbs;
+  skipifeq tDx, zero;
+  goto near1_dx_not0;
+  goto near1_dx_ok;
+
+near1_dx_not0:
+  set tDx2, dxAbs;
+  setn one, 1;
+  skipifeq tDx2, one;
+  goto near1_finish;        # dxAbs > 1
+near1_dx_ok:
+  # dyAbs <= 1 ?
+  set tDy, dyAbs;
+  skipifeq tDy, zero;
+  goto near1_dy_not0;
+  goto near1_true;
+
+near1_dy_not0:
+  set tDy2, dyAbs;
+  setn one2, 1;
+  skipifeq tDy2, one2;
+  goto near1_finish;        # dyAbs > 1
+
+near1_true:
+  setn near1, 1;
+
+near1_finish:
+
+  # near2: dxAbs <= 2 and dyAbs <= 2
+  setn near2, 0;
+
+  # dxAbs <= 2 ?
+  set tDx3, dxAbs;
+  skipifeq tDx3, zero;
+  goto near2_dx_not0;
+  goto near2_dx_ok;
+
+near2_dx_not0:
+  set tDx4, dxAbs;
+  setn one3, 1;
+  skipifeq tDx4, one3;
+  goto near2_dx_check2;
+  goto near2_dx_ok;
+
+near2_dx_check2:
+  set tDx5, dxAbs;
+  setn two, 2;
+  skipifeq tDx5, two;
+  goto near2_finish;        # dxAbs > 2
+near2_dx_ok:
+  # dyAbs <= 2 ?
+  set tDy3, dyAbs;
+  skipifeq tDy3, zero;
+  goto near2_dy_not0;
+  goto near2_true;
+
+near2_dy_not0:
+  set tDy4, dyAbs;
+  setn one4, 1;
+  skipifeq tDy4, one4;
+  goto near2_dy_check2;
+  goto near2_true;
+
+near2_dy_check2:
+  set tDy5, dyAbs;
+  setn two2, 2;
+  skipifeq tDy5, two2;
+  goto near2_finish;        # dyAbs > 2
+
+near2_true:
+  setn near2, 1;
+
+near2_finish:
 }
 
 # --- Enemy damage cooldown per slot -------------------------------------------
@@ -2338,16 +2508,206 @@ enemy_setCooldown:
 enemy_noDamage:
 }
 
-# --- Top-level level step: scr_level_step -------------------------------------
-# For now: update all enemies + frameCounter.
-# (Acorn logic and separate rattlesnake/eagle behaviors can be added later.)
+# --- Rattlesnake behaviour ----------------------------------------------------
+# idx      : enemy slot index
+# Uses: ptx, pty, ex, ey, dxAbs, dyAbs, near1, near2, sameTile
+
+macro rattlesnakeStep(r idx) {
+  enemyGetDamageCounter idx, d;
+  enemyGetCanDamage     idx, can;
+
+  # Move towards player only when:
+  # - canDamage is set
+  # - d > 0 (has ticked at least once)
+  # - player within Chebyshev distance 1 (near1)
+  set tCan, can;
+  setn zero, 0;
+  skipifeq tCan, zero;
+  goto rs_can_nonzero;
+  goto rs_after_move;
+
+rs_can_nonzero:
+  set tD, d;
+  skipifeq tD, zero;
+  goto rs_d_nonzero;
+  goto rs_after_move;
+
+rs_d_nonzero:
+  set tNear1, near1;
+  skipifeq tNear1, zero;
+  goto rs_doMove;
+  goto rs_after_move;
+
+rs_doMove:
+  moveEnemyTowardPlayer idx, ptx, pty;
+
+rs_after_move:
+
+  # If on same tile, handle damage / branch immunity
+  readMemConstReg sameTileSpill, sameTile;
+  set tSame, sameTile;
+  writeMemConstReg sameTileSpill, sameTile;
+  skipifeq tSame, zero;
+  goto rs_same;
+  goto rs_notSame;
+
+rs_same:
+  # Check if player is on a branch – rattlesnake cannot damage
+  playerGetOnBranch onBr;
+  setn zeroOn, 0;
+  skipifeq onBr, zeroOn;
+  goto rs_onBranch;
+  goto rs_damagePlayer;
+
+rs_onBranch:
+  enemyClearCanDamage idx;
+  setn zeroCD, 0;
+  enemySetDamageCounter idx, zeroCD;
+  goto rs_done;
+
+rs_damagePlayer:
+  playerGetHp hp;
+  setn zeroHp, 0;
+  skipifeq hp, zeroHp;
+  goto rs_hpNonZero;
+  goto rs_done;
+
+rs_hpNonZero:
+  addn hp, 255;            # hp = hp - 1
+  playerSetHp hp;
+
+  # Enter cooldown: damage counter = 1, canDamage = 0
+  setn newD, 1;
+  enemySetDamageCounter idx, newD;
+  enemyClearCanDamage idx;
+  goto rs_done;
+
+rs_notSame:
+  # Not on top of player: d++
+  addn d, 1;
+  enemySetDamageCounter idx, d;
+
+  # Re-enable damage when:
+  #  - we are not in the immediate 1-tile radius (near1 == 0)
+  #  - and the counter has reached a threshold (here 20 frames)
+  set tNearAgain, near1;
+  skipifeq tNearAgain, zero;
+  goto rs_done;           # still close, keep cooldown
+
+  set tD2, d;
+  setn dRe, 20;
+  skipifeq tD2, dRe;
+  goto rs_done;
+  enemySetCanDamage idx;
+
+rs_done:
+}
+
+# --- Eagle behaviour ---------------------------------------------------------
+# idx      : enemy slot index
+# Uses: ptx, pty, ex, ey, dxAbs, dyAbs, near1, near2, sameTile
+
+macro eagleStep(r idx) {
+  # Movement cooldown: if moveCounter > 0, decrement it first
+  enemyGetMoveCounter idx, moveC;
+
+  set mcTmp0, moveC;
+  setn zeroMC0, 0;
+  skipifeq mcTmp0, zeroMC0;
+  goto es_decMC;
+  goto es_afterDec;
+
+es_decMC:
+  addn moveC, 255;              # moveC = moveC - 1
+  enemySetMoveCounter idx, moveC;
+
+es_afterDec:
+  # Re-read updated moveCounter
+  enemyGetMoveCounter idx, moveC;
+
+  enemyGetDamageCounter idx, d;
+  enemyGetCanDamage     idx, can;
+
+  # Chase when:
+  #  - canDamage is set
+  #  - within Chebyshev distance 2
+  #  - moveCounter == 0 (not on movement cooldown)
+  set tCanE, can;
+  setn zeroE, 0;
+  skipifeq tCanE, zeroE;
+  goto es_can_nonzero;
+  goto es_after_chase;
+
+es_can_nonzero:
+  set tNear2, near2;
+  skipifeq tNear2, zeroE;
+  goto es_near;
+  goto es_after_chase;
+
+es_near:
+  set mcTmp, moveC;
+  setn zeroMC, 0;
+  skipifeq mcTmp, zeroMC;
+  goto es_after_chase;
+  # Allowed to move this frame
+  moveEnemyTowardPlayer idx, ptx, pty;
+  setn newMC, 5;                # small movement cooldown
+  enemySetMoveCounter idx, newMC;
+
+es_after_chase:
+
+  # Damage if exactly on player tile (no branch immunity for eagles)
+  readMemConstReg sameTileSpill, sameTile;
+  set tSameE, sameTile;
+  skipifeq tSameE, zeroE;
+  goto es_same;
+  goto es_notSame;
+
+es_same:
+  playerGetHp hpE;
+  setn zeroHpE, 0;
+  skipifeq hpE, zeroHpE;
+  goto es_hpNonZero;
+  goto es_afterHit;
+
+es_hpNonZero:
+  addn hpE, 255;                # hp--
+  playerSetHp hpE;
+
+  # After a hit, start cooldown and set movement cooldown
+  setn newD2, 1;
+  enemySetDamageCounter idx, newD2;
+  enemyClearCanDamage idx;
+
+  setn newMC2, 5;
+  enemySetMoveCounter idx, newMC2;
+
+es_afterHit:
+  goto es_done;
+
+es_notSame:
+  # Not overlapping: d++
+  addn d, 1;
+  enemySetDamageCounter idx, d;
+
+  # After a short distance of time since last contact, allow damage again
+  set tD2E, d;
+  setn readyD, 4;               # "d > 3" approx -> d == 4
+  skipifeq tD2E, readyD;
+  goto es_done;
+  enemySetCanDamage idx;
+
+es_done:
+}
+
+# --- Level step: update all enemies, then frameCounter -----------------------
 
 macro scr_level_step() {
-  # Player tile position
+  # Player tile position once per frame
   playerGetTileX ptx;
   playerGetTileY pty;
 
-  # Enemy loop
+  # Enemy loop over [0, enemyCounter)
   loadEnemyCounter enemyCount;
   setn ei, 0;
 
@@ -2358,10 +2718,35 @@ enemy_loop:
   goto enemies_done;
 
 enemy_body:
-  enemyCooldownStep ei;
-  moveEnemyTowardPlayer ei, ptx, pty;
-  enemyTryDamagePlayer ei, ptx, pty;
+  # Enemy tile coordinates
+  enemyGetTileX ei, ex;
+  enemyGetTileY ei, ey;
 
+  # Distance in tile space
+  absDiff32 ptx, ex, dxAbs;
+  absDiff32 pty, ey, dyAbs;
+  computeProximityFlags dxAbs, dyAbs, near1, near2, sameTile;
+
+  # Type dispatch
+  enemyGetType ei, eType;
+
+  # Rattlesnake?
+  set tType, eType;
+  setn tSnake, enemyTypeRattlesnake;
+  skipifeq tType, tSnake;
+  goto notSnake;
+  rattlesnakeStep ei;
+  goto enemy_next;
+
+notSnake:
+  # Eagle?
+  set tType2, eType;
+  setn tEagle, enemyTypeEagle;
+  skipifeq tType2, tEagle;
+  goto enemy_next;
+  eagleStep ei;
+
+enemy_next:
   addn ei, 1;
   goto enemy_loop;
 
