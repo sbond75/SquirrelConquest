@@ -101,4 +101,14 @@ macro main() {
   setn x, 3;
   setn y, 5;
   drawNum2 num, x, y;
+  setn mm, 10;
+  setdelay mm;
+  loop1:
+  getdelay mm;
+  skipifeqn mm, 0;
+  goto loop1;
+  loop:
+  setn mm, 100;
+  setsound mm;
+  goto loop;
 }
